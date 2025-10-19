@@ -40,8 +40,8 @@ def send_ack(ser, received_hash):
     except Exception as e:
         print(f"❌ ACK send failed: {e}")
 
-def parse_packet(hex_data):
-    """Parse CBOR packet: [LENGTH][CBOR][HASH]"""
+def parse_header_packet(hex_data):
+    """Parse CBOR header packet: [LENGTH][CBOR][HASH]"""
     try:
         # Extract length (2 bytes, little endian)
         length = int.from_bytes(bytes.fromhex(hex_data[:4]), "little")
@@ -71,7 +71,47 @@ def parse_packet(hex_data):
             "calculated_hash": calculated_hash
         }
     except Exception as e:
-        print(f"Parse error: {e}")
+        print(f"Parse header error: {e}")
+        return None
+
+def parse_chunk_packet(hex_data):
+    """Parse CBOR chunk packet: [PACKET_ID][LENGTH][CBOR][HASH]"""
+    try:
+        # Extract packet ID (1 byte)
+        packet_id = int.from_bytes(bytes.fromhex(hex_data[:2]), "little")
+        
+        # Extract length (2 bytes, little endian)
+        length = int.from_bytes(bytes.fromhex(hex_data[2:6]), "little")
+        
+        # Extract CBOR data
+        cbor_hex = hex_data[6:6 + length * 2]
+        cbor_bytes = bytes.fromhex(cbor_hex)
+        
+        # Extract hash (4 bytes at end)
+        hash_hex = hex_data[6 + length * 2:6 + length * 2 + 8]
+        received_hash = int.from_bytes(bytes.fromhex(hash_hex), "little")
+        
+        # Verify hash
+        calculated_hash = calculate_crc(cbor_bytes)
+        hash_valid = received_hash == calculated_hash
+        
+        ACK_REQUESTED = 8
+        # Decode CBOR
+        try:
+            decoded = cbor2.loads(cbor_bytes)
+        except:
+            decoded = {"error": "cbor decode failed"}
+        
+        return {
+            "ack_requested": decoded.get(ACK_REQUESTED, 0),
+            "packet_id": packet_id,
+            "data": decoded,
+            "hash_valid": hash_valid,
+            "received_hash": received_hash,
+            "calculated_hash": calculated_hash
+        }
+    except Exception as e:
+        print(f"Parse chunk error: {e}")
         return None
 
 def serial_reader(ser, data_queue, stop_event):
@@ -147,7 +187,7 @@ def packet_processor(ser, data_queue, stop_event):
                     print("=== Header End ===")
                     receiving_header = False
                     if packet_data:
-                        result = parse_packet(packet_data.hex())
+                        result = parse_header_packet(packet_data.hex())
                         if result:
                             print(f"Header data: {result['data']}")
                             print(f"Hash valid: {result['hash_valid']}")
@@ -170,16 +210,19 @@ def packet_processor(ser, data_queue, stop_event):
                     print("=== Chunk End ===")
                     receiving_chunk = False
                     if packet_data:
-                        result = parse_packet(packet_data.hex())
+                        result = parse_chunk_packet(packet_data.hex())
                         if result:
                             print(f"Chunk data: {result['data']}")
+                            print(f"Chunk packet ID: {result['packet_id']}")
                             print(f"Hash valid: {result['hash_valid']}")
-                            
-                            # Send ACK if hash is valid
-                            if result['hash_valid']:
-                                send_ack(ser, result['received_hash'])
+                            if result.get('ack_requested', 1):
+                                # Send ACK if hash is valid
+                                if result['hash_valid']:
+                                    send_ack(ser, result['received_hash'])
+                                else:
+                                    print("❌ Hash invalid, no ACK sent")
                             else:
-                                print("❌ Hash invalid, no ACK sent")
+                                print("❌ ACK not requested, no ACK sent")
                     packet_data = bytearray()
                     buffer = buffer[4:]
                     
