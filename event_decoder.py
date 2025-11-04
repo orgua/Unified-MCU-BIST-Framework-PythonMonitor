@@ -6,29 +6,26 @@ Decodes 31-bit event types using one-hot encoding
 
 # Pin Event Type definitions
 PIN_EVENT_TYPES = {
-    0: "PIN_INITIALLY_LOW",
-    1: "PIN_INITIALLY_HIGH", 
-    2: "PIN_DISTURBED",
-    3: "HANDSHAKE_OK_INITIATOR",
-    4: "HANDSHAKE_OK_RESPONDER",
-    5: "HANDSHAKE_FAILURE",
-    6: "DATA_HANDSHAKE_OK",
-    7: "DATA_HANDSHAKE_FAILURE",
-    8: "PIN_IS_CONNECTED_WITH_INTERNAL_PIN",
-    9: "PIN_IS_CONNECTED_WITH_EXTERNAL_PIN",
-    10: "PIN_IS_NOT_LOW_WHEN_PULLED_DOWN",
-    11: "PIN_IS_NOT_HIGH_WHEN_PULLED_UP",
-    12: "PIN_IS_NOT_LOW_WHEN_DRIVEN_LOW",
-    13: "PIN_IS_NOT_HIGH_WHEN_DRIVEN_HIGH",
-    14: "UART_RX_IS_NOT_WORKING",
-    15: "EXPECTS_TO_WORK_IN_ONE_DIRECTION"
+    0: "HANDSHAKE_OK_INITIATOR",
+    1: "HANDSHAKE_OK_RESPONDER",
+    2: "HANDSHAKE_FAILURE",
+    3: "DATA_HANDSHAKE_OK",
+    4: "DATA_HANDSHAKE_FAILURE",
+    5: "PIN_IS_CONNECTED_WITH_INTERNAL_PIN",
+    6: "PIN_IS_NOT_LOW_WHEN_PULLED_DOWN",
+    7: "PIN_IS_NOT_HIGH_WHEN_PULLED_UP",
+    8: "PIN_IS_NOT_LOW_WHEN_DRIVEN_LOW",
+    9: "PIN_IS_NOT_HIGH_WHEN_DRIVEN_HIGH",
+    10: "UART_RX_IS_NOT_WORKING",
+    11: "EXPECTS_TO_WORK_IN_ONE_DIRECTION",
+    12: "EXCEEDS_CONNECTION_LIMIT"
 }
 
 def decode_event_type_one_hot(event_bits):
     events = []
     
-    # Check each bit position (0-30, since we have 31 bits)
-    for bit_position in range(31):
+    # Check each bit position (0-15, since we have 16 bits)
+    for bit_position in range(16):
         # Check if this bit is set
         if event_bits & (1 << bit_position):
             event_name = PIN_EVENT_TYPES.get(bit_position, f"UNKNOWN_EVENT_{bit_position}")

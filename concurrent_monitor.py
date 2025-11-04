@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
-"""
-Concurrent CBOR Serial Monitor
-"""
-
 import serial
 import cbor2
 import crcmod
 import time
 import threading
 import queue
-from event_decoder import decode_result, format_event_list, merge_handshake_events
+from event_decoder import decode_result, format_event_list, merge_handshake_events, decode_event_type_one_hot
 from data_storage import DeviceDataCollector
 
 # Configuration
-PORT = "/dev/tty.usbmodem11102"
+PORT = "/dev/tty.usbmodem1102"
 BAUDRATE = 9600
 
 # Protocol identifiers (4 bytes each, little endian)
@@ -248,15 +244,34 @@ def packet_processor(ser, data_queue, stop_event):
                                 if isinstance(pin, dict):
                                     print(f"    Pin {i}:")
                                     print(f"      [4] PIN: {pin.get(4)}")
-                                    print(f"      [5] EVENTS: {pin.get(5, 0)} ({bin(pin.get(5, 0))})")
-                                    print(f"      [8] DEVICE_ID: {pin.get(8)}")
+                                    
+                                    # Events dekodieren und anzeigen
+                                    events_raw = pin.get(5, 0)
+                                    events_decoded = decode_event_type_one_hot(events_raw)
+                                    events_merged = merge_handshake_events(events_decoded)
+                                    print(f"      [5] EVENTS: {events_raw} ({bin(events_raw)})")
+                                    if events_merged:
+                                        print(f"          Decoded: {', '.join(events_merged)}")
+                                    else:
+                                        print(f"          Decoded: No events")
                                     
                                     connections = pin.get(6, [])
                                     if connections:
                                         print(f"      [6] CONNECTIONS ({len(connections)} entries):")
                                         for j, conn in enumerate(connections):
                                             if isinstance(conn, dict):
-                                                print(f"        Conn {j}: [7] OTHER_PIN={conn.get(7)}, [8] DEVICE_ID={conn.get(8)}")
+                                                print(f"        Conn {j} RAW: {conn}")
+                                                conn_type = conn.get(9, 0)
+                                                param = conn.get(8, 0)
+                                                other_pin = conn.get(7, -1)
+                                                
+                                                if conn_type == 0:  # INTERNAL
+                                                    phase_names = ["PULLDOWN_DRIVE_LOW", "PULLUP_DRIVE_HIGH", 
+                                                                  "NO_PULL_DRIVE_LOW", "NO_PULL_DRIVE_HIGH"]
+                                                    phase_str = phase_names[param] if param < 4 else f"PHASE_{param}"
+                                                    print(f"        Conn {j}: [7] OTHER_PIN={other_pin}, [8] PARAM=Phase:{phase_str}, [9] TYPE=INTERNAL")
+                                                else:  # EXTERNAL
+                                                    print(f"        Conn {j}: [7] OTHER_PIN={other_pin}, [8] PARAM=DeviceID:{param}, [9] TYPE=EXTERNAL")
                                     else:
                                         print(f"      [6] CONNECTIONS: []")
                                 else:
