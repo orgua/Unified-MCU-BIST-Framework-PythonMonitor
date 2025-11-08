@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""
-Event Decoder for CBOR Serial Monitor
-Decodes 31-bit event types using one-hot encoding
+"""Event Decoder for CBOR Serial Monitor
+
+Decodes one-hot encoded event integers into human-readable event names.
+Supports the device event enum (24 events) and scans a full 32-bit mask.
 """
 
-# Pin Event Type definitions
+# Pin Event Type definitions (indexes must match device enum)
 PIN_EVENT_TYPES = {
     0: "HANDSHAKE_OK_INITIATOR",
     1: "HANDSHAKE_OK_RESPONDER",
@@ -18,19 +19,32 @@ PIN_EVENT_TYPES = {
     9: "PIN_IS_NOT_HIGH_WHEN_DRIVEN_HIGH",
     10: "UART_RX_IS_NOT_WORKING",
     11: "EXPECTS_TO_WORK_IN_ONE_DIRECTION",
-    12: "EXCEEDS_CONNECTION_LIMIT"
+    12: "EXCEEDS_CONNECTION_LIMIT",
+    13: "STEP_1_A_HIGH",
+    14: "STEP_1_A_LOW",
+    15: "STEP_1_B_HIGH",
+    16: "STEP_1_B_LOW",
+    17: "STEP_2_A_HIGH",
+    18: "STEP_2_A_LOW",
+    19: "STEP_2_B_HIGH",
+    20: "STEP_2_B_LOW",
+    21: "STEP_3_A_HIGH",
+    22: "STEP_3_A_LOW",
+    23: "STEP_3_B_HIGH",
+    24: "STEP_3_B_LOW",
 }
 
+
 def decode_event_type_one_hot(event_bits):
+    """Return list of event names for bits set in event_bits.
+
+    Scans bits 0..31 (inclusive) to support full 32-bit masks.
+    """
     events = []
-    
-    # Check each bit position (0-15, since we have 16 bits)
-    for bit_position in range(16):
-        # Check if this bit is set
+    for bit_position in range(32):
         if event_bits & (1 << bit_position):
             event_name = PIN_EVENT_TYPES.get(bit_position, f"UNKNOWN_EVENT_{bit_position}")
             events.append(event_name)
-    
     return events
 
 def merge_handshake_events(events):

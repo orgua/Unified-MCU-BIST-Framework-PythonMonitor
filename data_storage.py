@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from event_decoder import decode_event_type_one_hot, merge_handshake_events
+from pin_analyzer import analyze_all_pins
 import base64
 import hashlib
 import cbor2
@@ -194,19 +195,26 @@ class DeviceDataCollector:
             print(f"✅ Collection complete")
             
             # Ausgabe aller Matrizen für alle Devices
+            # Print connections summary once
+            self.print_connections_summary()
+
+            # Externe Connection Matrizen (zu anderen Devices) und Phasen-Matrizen per Device
             for device_family in sorted(self.devices.keys()):
-                # Connection Summary
-                self.print_connections_summary()
-                
                 # Externe Connection Matrizen (zu anderen Devices)
                 for other_device in sorted(self.devices.keys()):
                     if device_family != other_device:
                         matrix = self.create_connection_matrix(device_family, other_device)
                         if matrix and any(any(row) for row in matrix):  # Nur ausgeben wenn Verbindungen existieren
                             self.print_connection_matrix(device_family, other_device)
-                
+
                 # Alle 4 Phasen-Matrizen
                 self.print_all_phase_matrices(device_family)
+
+            # After connections and matrices, print events for all pins
+            self.print_all_pin_events()
+            
+            # Run pin force analysis for all devices
+            self.run_pin_analysis()
         
         return complete
     
@@ -227,6 +235,31 @@ class DeviceDataCollector:
                     else:  # EXTERNAL
                         print(f"  {pin_name} -> Device{param}:{other_pin_name} [EXT]")
         print("="*23 + "\n")
+
+    def print_all_pin_events(self):
+        """Print decoded events for all pins for all devices."""
+        print("\n=== Pin Events ===")
+        for device_family, device_data in sorted(self.devices.items()):
+            print(f"Device {device_family}:")
+            for pin in device_data['pins']:
+                pin_name = get_pin_name(device_family, pin['pin'])
+                events = pin.get('events', [])
+                if events:
+                    print(f"  {pin_name}: {', '.join(events)}")
+                else:
+                    print(f"  {pin_name}: No events")
+        print("="*23 + "\n")
+    
+    def run_pin_analysis(self):
+        """Run pin force analysis for all devices."""
+        for device_family, device_data in sorted(self.devices.items()):
+            results = analyze_all_pins(device_data['pins'])
+            print(f"\n{'='*80}")
+            print(f"Pin Force Analysis - Device {device_family}")
+            print(f"{'='*80}")
+            for result in results:
+                print(f"  {result}")
+            print(f"{'='*80}\n")
             
     def create_connection_matrix(self, controller_a, controller_b):
         if controller_a not in self.devices or controller_b not in self.devices:
