@@ -116,14 +116,14 @@ MSP430_PIN_NAMES = {
 def get_pin_name(device_family, pin_num):
     """Get the pin name for a given device family and pin number"""
     if "NRF" in str(device_family).upper():
-        return NRF52840_PIN_NAMES.get(pin_num, f"P{pin_num}")
+        return NRF52840_PIN_NAMES.get(pin_num, str(pin_num))
     elif "MSP" in str(device_family).upper():
-        return MSP430_PIN_NAMES.get(pin_num, f"P{pin_num}")
+        return MSP430_PIN_NAMES.get(pin_num, str(pin_num))
     else:
-        return f"P{pin_num}"
+        return str(pin_num)
 
 def get_known_pins(device_family):
-    """Get list of known pin numbers for a device family in definition order"""
+    """Get list of known pin numbers for a device family"""
     if "NRF" in str(device_family).upper():
         return list(NRF52840_PIN_NAMES.keys())
     elif "MSP" in str(device_family).upper():
@@ -131,11 +131,15 @@ def get_known_pins(device_family):
     else:
         return []
 
-def get_known_pins_sorted(device_family, pin_list):
-    """Sort pins by their order in PIN_NAMES dictionary"""
-    known = get_known_pins(device_family)
-    # Filter to only known pins, then sort by position in PIN_NAMES dict
-    return [p for p in known if p in pin_list]
+def get_all_pins_sorted(device_family, device_data):
+    """Get all pins from device data sorted by pin number"""
+    all_pins = set()
+    # Add all pins from device data
+    for pin in device_data.get('pins', []):
+        all_pins.add(pin['pin'])
+    # Also add all known pins from mapping
+    all_pins.update(get_known_pins(device_family))
+    return sorted(all_pins)
 
 
 class TeeOutput:
@@ -154,6 +158,7 @@ class TeeOutput:
 
 
 class DeviceDataCollector:
+    """Collects and processes device pin data from CBOR packets"""
     
     def __init__(self):
         self.devices = {}
@@ -161,7 +166,9 @@ class DeviceDataCollector:
         self.output_file = None
         self.original_stdout = None
         self.device_uuid = None
-        
+    
+    # ===== Data Processing Methods =====
+    
     def process_header(self, header_result):
         if not header_result or not header_result.get('hash_valid'):
             return False
@@ -204,13 +211,29 @@ class DeviceDataCollector:
             events_raw = pin_entry.get(KEY_EVENTS, 0)
             events = merge_handshake_events(decode_event_type_one_hot(events_raw)) if events_raw else []
             
+            # Filter connections - remove WEAK naturally driven connections
+            filtered_connections = []
+            for c in pin_entry.get(KEY_CONNECTIONS, []):
+                conn_type = c.get(KEY_CONNECTION_TYPE, 0)
+                if conn_type == CONNECTION_TYPE_INTERNAL:
+                    phase = c.get(KEY_CONNECTION_PARAMETER, -1)
+                    if not self._should_mask_connection(events, phase):
+                        filtered_connections.append({
+                            KEY_OTHER_PIN: c.get(KEY_OTHER_PIN), 
+                            KEY_CONNECTION_PARAMETER: phase,
+                            KEY_CONNECTION_TYPE: conn_type
+                        })
+                else:
+                    filtered_connections.append({
+                        KEY_OTHER_PIN: c.get(KEY_OTHER_PIN), 
+                        KEY_CONNECTION_PARAMETER: c.get(KEY_CONNECTION_PARAMETER),
+                        KEY_CONNECTION_TYPE: conn_type
+                    })
+            
             device['pins'].append({
                 'pin': pin_entry.get(KEY_PIN),
                 'events': events,
-                'connections': [{KEY_OTHER_PIN: c.get(KEY_OTHER_PIN), 
-                                KEY_CONNECTION_PARAMETER: c.get(KEY_CONNECTION_PARAMETER),
-                                KEY_CONNECTION_TYPE: c.get(KEY_CONNECTION_TYPE, 0)} 
-                               for c in pin_entry.get(KEY_CONNECTIONS, [])]
+                'connections': filtered_connections
             })
         
         device['chunks_received'].add(chunk_id)
@@ -219,6 +242,8 @@ class DeviceDataCollector:
     
     def get_all_devices(self):
         return self.devices
+    
+    # ===== File Output Methods =====
     
     def _start_output_capture(self):
         """Start capturing output to file"""
@@ -295,6 +320,8 @@ class DeviceDataCollector:
         self.run_pin_analysis()
         self._stop_output_capture()
     
+    # ===== Output Display Methods =====
+    
     def print_connections_summary(self):
         print("\n=== Pin Connections ===")
         for device_family, device_data in sorted(self.devices.items()):
@@ -330,14 +357,41 @@ class DeviceDataCollector:
     def run_pin_analysis(self):
         """Run pin force analysis for all devices."""
         for device_family, device_data in sorted(self.devices.items()):
-            results = analyze_all_pins(device_data['pins'])
             print(f"\n{'='*80}")
             print(f"Pin Force Analysis - Device {device_family}")
             print(f"{'='*80}")
-            for result in results:
+            for pin_data in device_data['pins']:
+                pin_num = pin_data.get('pin', 'UNKNOWN')
+                pin_name = get_pin_name(device_family, pin_num)
+                events = pin_data.get('events', [])
+                from pin_analyzer import analyze_pin
+                result = analyze_pin(pin_name, events)
                 print(f"  {result}")
             print(f"{'='*80}\n")
-            
+    
+    # ===== Matrix Generation Methods =====
+    
+    def _should_mask_connection(self, events, phase):
+        """Mask connections for WEAK pins in specific phases"""
+        ev = set(events)
+        
+        # Check if pin is naturally LOW or HIGH
+        naturally_low = 'STEP_1_A_LOW' in ev and 'STEP_1_B_LOW' in ev
+        naturally_high = 'STEP_1_A_HIGH' in ev and 'STEP_1_B_HIGH' in ev
+        
+        # Check if pin is WEAK (S2:2/2, S3:2/2)
+        s2_follows = ('STEP_2_A_LOW' in ev, 'STEP_2_B_HIGH' in ev)
+        s3_follows = ('STEP_3_A_LOW' in ev, 'STEP_3_B_HIGH' in ev)
+        is_weak = sum(s2_follows) == 2 and sum(s3_follows) == 2
+        
+        # Mask only if WEAK and naturally driven
+        if is_weak:
+            if naturally_low and phase in (0, 2):  # PULLDOWN/DRIVE_LOW phases
+                return True
+            if naturally_high and phase in (1, 3):  # PULLUP/DRIVE_HIGH phases
+                return True
+        return False
+    
     def create_connection_matrix(self, controller_a, controller_b):
         if controller_a not in self.devices or controller_b not in self.devices:
             print(f"❌ Controller {controller_a} oder {controller_b} nicht gefunden")
@@ -379,15 +433,8 @@ class DeviceDataCollector:
         device_a = self.devices[controller_a]
         device_b = self.devices[controller_b]
         
-        # Filter nur bekannte Pins
-        known_pins_a = get_known_pins(controller_a)
-        known_pins_b = get_known_pins(controller_b)
-        
-        available_pins_a = [pin['pin'] for pin in device_a['pins'] if pin['pin'] in known_pins_a]
-        available_pins_b = [pin['pin'] for pin in device_b['pins'] if pin['pin'] in known_pins_b]
-        
-        pin_nums_a = get_known_pins_sorted(controller_a, available_pins_a)
-        pin_nums_b = get_known_pins_sorted(controller_b, available_pins_b)
+        pin_nums_a = get_all_pins_sorted(controller_a, device_a)
+        pin_nums_b = get_all_pins_sorted(controller_b, device_b)
         
         if not pin_nums_a or not pin_nums_b:
             return
@@ -397,17 +444,23 @@ class DeviceDataCollector:
         print(f"External Connection Matrix: Device {controller_a} -> Device {controller_b}")
         print(f"{'='*num_cols}")
         
-        # Zeilen mit Pin-Namen
         pin_to_idx_a = {pin['pin']: idx for idx, pin in enumerate(device_a['pins'])}
         pin_to_idx_b = {pin['pin']: idx for idx, pin in enumerate(device_b['pins'])}
         
         for pin_a in pin_nums_a:
             pin_name_a = get_pin_name(controller_a, pin_a)
             print(f"{pin_name_a[:15]:15}|", end="")
-            idx_a = pin_to_idx_a[pin_a]
-            for pin_b in pin_nums_b:
-                idx_b = pin_to_idx_b[pin_b]
-                print(f"{matrix[idx_a][idx_b]:2} ", end="")
+            if pin_a in pin_to_idx_a:
+                idx_a = pin_to_idx_a[pin_a]
+                for pin_b in pin_nums_b:
+                    if pin_b in pin_to_idx_b:
+                        idx_b = pin_to_idx_b[pin_b]
+                        print(f"{matrix[idx_a][idx_b]:2} ", end="")
+                    else:
+                        print(f" 0 ", end="")
+            else:
+                for pin_b in pin_nums_b:
+                    print(f" 0 ", end="")
             print()
         
         print("=" * num_cols + "\n")
@@ -444,10 +497,13 @@ class DeviceDataCollector:
             error_event = phase_error_events.get(phase)
             pin_works = error_event and error_event not in pin['events']
             
-            if pin_works:
+            # Check if connection should be masked for this pin
+            should_mask = self._should_mask_connection(pin['events'], phase)
+            
+            if pin_works and not should_mask:
                 matrix[idx_a][idx_a] = 1
             
-            # Prüfe alle Connections dieses Pins
+            # Prüfe alle Connections dieses Pins (bereits gefiltert beim Laden)
             for conn in pin['connections']:
                 conn_type = conn.get(KEY_CONNECTION_TYPE, 0)
                 
@@ -470,10 +526,7 @@ class DeviceDataCollector:
             return
         
         device = self.devices[controller]
-        
-        known_pins = get_known_pins(controller)
-        available_pins = [pin['pin'] for pin in device['pins'] if pin['pin'] in known_pins]
-        pin_nums = get_known_pins_sorted(controller, available_pins)
+        pin_nums = get_all_pins_sorted(controller, device)
         
         if not pin_nums:
             return
@@ -495,10 +548,17 @@ class DeviceDataCollector:
         for pin_a in pin_nums:
             pin_name_a = get_pin_name(controller, pin_a)
             print(f"{pin_name_a[:15]:15}|", end="")
-            idx_a = pin_to_idx[pin_a]
-            for pin_b in pin_nums:
-                idx_b = pin_to_idx[pin_b]
-                print(f"{matrix[idx_a][idx_b]:2} ", end="")
+            if pin_a in pin_to_idx:
+                idx_a = pin_to_idx[pin_a]
+                for pin_b in pin_nums:
+                    if pin_b in pin_to_idx:
+                        idx_b = pin_to_idx[pin_b]
+                        print(f"{matrix[idx_a][idx_b]:2} ", end="")
+                    else:
+                        print(f" 0 ", end="")
+            else:
+                for pin_b in pin_nums:
+                    print(f" 0 ", end="")
             print()
         
         print("=" * num_cols + "\n")
@@ -510,6 +570,8 @@ class DeviceDataCollector:
         
         for phase in range(4):
             self.print_phase_matrix(controller, phase)
+    
+    # ===== Export Methods =====
     
     def to_cbor(self):
         

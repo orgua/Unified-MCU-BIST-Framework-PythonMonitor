@@ -1,0 +1,13 @@
+/logs/
+.vscode/
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+*.sqlite3
+*.db
+*.log
+*.cpython-*
