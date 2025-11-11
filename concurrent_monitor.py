@@ -5,11 +5,13 @@ import crcmod
 import time
 import threading
 import queue
+import sys
+import select
 from event_decoder import decode_result, format_event_list, merge_handshake_events, decode_event_type_one_hot
 from data_storage import DeviceDataCollector
 
 # Configuration
-PORT = "/dev/tty.usbmodem21202"
+PORT = "/dev/tty.usbmodem11202"
 BAUDRATE = 9600
 
 # Protocol identifiers (4 bytes each, little endian)
@@ -132,18 +134,15 @@ def serial_reader(ser, data_queue, stop_event):
     
     print("📡 Serial reader stopped")
 
-def packet_processor(ser, data_queue, stop_event):
+def packet_processor(ser, data_queue, stop_event, collector):
     """Process 2: Process incoming data and handle protocol"""
     print("Packet processor thread started")
     
     buffer = bytearray()
     packet_data = bytearray()
-    debug_buffer = bytearray()  # Separate buffer for DEBUG messages
+    debug_buffer = bytearray()
     receiving_header = False
     receiving_chunk = False
-    
-    # Initialize data collector
-    collector = DeviceDataCollector()
     
     while not stop_event.is_set():
         try:
@@ -315,14 +314,15 @@ def monitor_serial():
     """Concurrent serial monitor with two threads"""
     print(f"Opening {PORT} at {BAUDRATE} baud...")
     
+    collector = DeviceDataCollector()
+    
     with serial.Serial(PORT, BAUDRATE, timeout=1) as ser:
-        # Shared data structures
-        data_queue = queue.Queue(maxsize=1000)  # Buffer for data transfer
+        data_queue = queue.Queue(maxsize=1000)
         stop_event = threading.Event()
         
         print("Starting concurrent monitoring...")
+        print("Press 's' to save")
         
-        # Create and start threads
         reader_thread = threading.Thread(
             target=serial_reader,
             args=(ser, data_queue, stop_event),
@@ -331,7 +331,7 @@ def monitor_serial():
         
         processor_thread = threading.Thread(
             target=packet_processor,
-            args=(ser, data_queue, stop_event),
+            args=(ser, data_queue, stop_event, collector),
             name="PacketProcessor"
         )
         
@@ -342,20 +342,18 @@ def monitor_serial():
         processor_thread.start()
         
         try:
-            # Main thread just waits for interruption
             while True:
-                time.sleep(0.1)
+                if sys.stdin in select.select([sys.stdin], [], [], 0.1)[0]:
+                    cmd = sys.stdin.read(1)
+                    if cmd == 's':
+                        collector.manual_save()
                 
-                # Check if threads are still alive
-                if not reader_thread.is_alive():
-                    print("❌ Reader thread died")
-                    break
-                if not processor_thread.is_alive():
-                    print("❌ Processor thread died")
+                if not reader_thread.is_alive() or not processor_thread.is_alive():
+                    print("❌ Thread died")
                     break
                     
         except KeyboardInterrupt:
-            print("\n🛑 Stopping monitor...")
+            print("\n🛑 Stopping...")
             
         finally:
             # Stop threads gracefully

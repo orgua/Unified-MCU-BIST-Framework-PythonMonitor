@@ -5,6 +5,8 @@ from pin_analyzer import analyze_all_pins
 import base64
 import hashlib
 import cbor2
+from datetime import datetime
+import sys
 
 KEY_CHUNK_ID = 0
 KEY_PINS = 2
@@ -14,6 +16,7 @@ KEY_CONNECTIONS = 6
 KEY_OTHER_PIN = 7
 KEY_CONNECTION_PARAMETER = 8  # Device ID (external) or Phase (internal)
 KEY_CONNECTION_TYPE = 9
+KEY_DEVICE_UUID = 0  # UUID from header
 
 # Connection Types
 CONNECTION_TYPE_INTERNAL = 0
@@ -120,7 +123,7 @@ def get_pin_name(device_family, pin_num):
         return f"P{pin_num}"
 
 def get_known_pins(device_family):
-    """Get list of known pin numbers for a device family"""
+    """Get list of known pin numbers for a device family in definition order"""
     if "NRF" in str(device_family).upper():
         return list(NRF52840_PIN_NAMES.keys())
     elif "MSP" in str(device_family).upper():
@@ -128,12 +131,36 @@ def get_known_pins(device_family):
     else:
         return []
 
+def get_known_pins_sorted(device_family, pin_list):
+    """Sort pins by their order in PIN_NAMES dictionary"""
+    known = get_known_pins(device_family)
+    # Filter to only known pins, then sort by position in PIN_NAMES dict
+    return [p for p in known if p in pin_list]
+
+
+class TeeOutput:
+    """Helper class to write to both stdout and file"""
+    def __init__(self, file_handle):
+        self.terminal = sys.stdout
+        self.log = file_handle
+    
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+    
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
 
 class DeviceDataCollector:
     
     def __init__(self):
         self.devices = {}
         self.current_device_family = None
+        self.output_file = None
+        self.original_stdout = None
+        self.device_uuid = None
         
     def process_header(self, header_result):
         if not header_result or not header_result.get('hash_valid'):
@@ -144,6 +171,9 @@ class DeviceDataCollector:
         if device_family is None:
             return False
         
+        # Get device UUID for filename
+        self.device_uuid = header_data.get(KEY_DEVICE_UUID, "UNKNOWN")
+        
         self.current_device_family = device_family
         
         # Clear existing data for this device_family when new header received
@@ -151,7 +181,8 @@ class DeviceDataCollector:
             'total_chunks': header_data.get(HEADER_KEY_TOTAL_CHUNKS, 0),
             'pins': [],
             'chunks_received': set(),
-            'complete': False
+            'complete': False,
+            'uuid': self.device_uuid
         }
         print(f"🔄 Reset data for device_family {device_family}")
         return True
@@ -189,9 +220,36 @@ class DeviceDataCollector:
     def get_all_devices(self):
         return self.devices
     
+    def _start_output_capture(self):
+        """Start capturing output to file"""
+        if self.device_uuid is None:
+            self.device_uuid = "UNKNOWN"
+        
+        import os
+        os.makedirs("logs", exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"logs/output_{self.device_uuid}_{timestamp}.txt"
+        
+        self.output_file = open(filename, 'w', encoding='utf-8')
+        self.original_stdout = sys.stdout
+        sys.stdout = TeeOutput(self.output_file)
+        
+        print(f"📝 Saving to: {filename}")
+            
+    def _stop_output_capture(self):
+        """Stop capturing output to file"""
+        if self.output_file:
+            sys.stdout = self.original_stdout
+            self.output_file.close()
+            print(f"✅ File saved")
+    
     def is_complete(self):
         complete = sum(1 for d in self.devices.values() if d['complete']) >= NUMBER_OF_EXPECTED_DEVICES_FOR_COMPLETION
         if complete:
+            # Start capturing output to file
+            self._start_output_capture()
+            
             print(f"✅ Collection complete")
             
             # Ausgabe aller Matrizen für alle Devices
@@ -215,8 +273,27 @@ class DeviceDataCollector:
             
             # Run pin force analysis for all devices
             self.run_pin_analysis()
+            
+            # Stop capturing output to file
+            self._stop_output_capture()
         
         return complete
+    
+    def manual_save(self):
+        """Manual save triggered by 's' command"""
+        self._start_output_capture()
+        print(f"💾 Manual save")
+        self.print_connections_summary()
+        for device_family in sorted(self.devices.keys()):
+            for other_device in sorted(self.devices.keys()):
+                if device_family != other_device:
+                    matrix = self.create_connection_matrix(device_family, other_device)
+                    if matrix and any(any(row) for row in matrix):
+                        self.print_connection_matrix(device_family, other_device)
+            self.print_all_phase_matrices(device_family)
+        self.print_all_pin_events()
+        self.run_pin_analysis()
+        self._stop_output_capture()
     
     def print_connections_summary(self):
         print("\n=== Pin Connections ===")
@@ -306,8 +383,11 @@ class DeviceDataCollector:
         known_pins_a = get_known_pins(controller_a)
         known_pins_b = get_known_pins(controller_b)
         
-        pin_nums_a = sorted([pin['pin'] for pin in device_a['pins'] if pin['pin'] in known_pins_a])
-        pin_nums_b = sorted([pin['pin'] for pin in device_b['pins'] if pin['pin'] in known_pins_b])
+        available_pins_a = [pin['pin'] for pin in device_a['pins'] if pin['pin'] in known_pins_a]
+        available_pins_b = [pin['pin'] for pin in device_b['pins'] if pin['pin'] in known_pins_b]
+        
+        pin_nums_a = get_known_pins_sorted(controller_a, available_pins_a)
+        pin_nums_b = get_known_pins_sorted(controller_b, available_pins_b)
         
         if not pin_nums_a or not pin_nums_b:
             return
@@ -392,7 +472,8 @@ class DeviceDataCollector:
         device = self.devices[controller]
         
         known_pins = get_known_pins(controller)
-        pin_nums = sorted([pin['pin'] for pin in device['pins'] if pin['pin'] in known_pins])
+        available_pins = [pin['pin'] for pin in device['pins'] if pin['pin'] in known_pins]
+        pin_nums = get_known_pins_sorted(controller, available_pins)
         
         if not pin_nums:
             return
