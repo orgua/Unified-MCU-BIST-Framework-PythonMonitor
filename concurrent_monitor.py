@@ -11,7 +11,7 @@ from event_decoder import decode_result, format_event_list, merge_handshake_even
 from data_storage import DeviceDataCollector
 
 # Configuration
-PORT = "/dev/tty.usbmodem11202"
+PORT = "/dev/tty.usbmodem11102"
 BAUDRATE = 9600
 
 # Protocol identifiers (4 bytes each, little endian)
@@ -192,17 +192,7 @@ def packet_processor(ser, data_queue, stop_event, collector):
                         
                         # Debug: Print CBOR structure with keys
                         data = result.get('data', {})
-                        print(f"CBOR Header:")
-                        print(f"  [0] DEVICE_UUID: {data.get(0)}")
-                        print(f"  [1] DEVICE_FAMILY: {data.get(1)}")
-                        print(f"  [2] TOTAL_CHUNKS: {data.get(2)}")
-                        print(f"  [3] TOTAL_PINS: {data.get(3)}")
-                        print(f"  [4] ACTIVE_PINS: {data.get(4)}")
-                        print(f"  [5] HEADER_HASH: {data.get(5)}")
-                        print(f"  [6] NUMBER_SEEN_DEVICES: {data.get(6)}")
-                        print(f"  [7] SEEN_DEVICE_IDS: {data.get(7)}")
-                        print(f"  [8] ACK_REQUESTED: {data.get(8)}")
-                        print(f"Hash valid: {result['hash_valid']}")
+                        print(f"CBOR Header: Device Family {data.get(1)}, Total Chunks {data.get(2)}")
                         
                         # Process header in collector
                         collector.process_header(result)
@@ -219,72 +209,24 @@ def packet_processor(ser, data_queue, stop_event, collector):
                     buffer = buffer[4:]
                     
                 elif buffer[:4] == CHUNK_START:
-                    print("=== Chunk Start ===")
                     receiving_chunk = True
                     packet_data = bytearray()
                     buffer = buffer[4:]
                     
                 elif buffer[:4] == CHUNK_END:
-                    print("=== Chunk End ===")
                     receiving_chunk = False
                     if packet_data:
                         result = parse_chunk_packet(packet_data.hex())
                         if result:
                             # Debug: Print CBOR structure with keys
                             data = result.get('data', {})
-                            print(f"CBOR Chunk (Packet ID: {result['packet_id']}):")
-                            print(f"  [0] CHUNK_ID: {data.get(0)}")
-                            print(f"  [1] NUM_ENTRIES: {data.get(1)}")
-                            print(f"  [3] CRC: {data.get(3)}")
-                            
-                            pins = data.get(2, [])
-                            print(f"  [2] PINS ({len(pins)} entries):")
-                            for i, pin in enumerate(pins):
-                                if isinstance(pin, dict):
-                                    print(f"    Pin {i}:")
-                                    print(f"      [4] PIN: {pin.get(4)}")
-                                    
-                                    # Events dekodieren und anzeigen
-                                    events_raw = pin.get(5, 0)
-                                    events_decoded = decode_event_type_one_hot(events_raw)
-                                    events_merged = merge_handshake_events(events_decoded)
-                                    print(f"      [5] EVENTS: {events_raw} ({bin(events_raw)})")
-                                    if events_merged:
-                                        print(f"          Decoded: {', '.join(events_merged)}")
-                                    else:
-                                        print(f"          Decoded: No events")
-                                    
-                                    connections = pin.get(6, [])
-                                    if connections:
-                                        print(f"      [6] CONNECTIONS ({len(connections)} entries):")
-                                        for j, conn in enumerate(connections):
-                                            if isinstance(conn, dict):
-                                                print(f"        Conn {j} RAW: {conn}")
-                                                conn_type = conn.get(9, 0)
-                                                param = conn.get(8, 0)
-                                                other_pin = conn.get(7, -1)
-                                                
-                                                if conn_type == 0:  # INTERNAL
-                                                    phase_names = ["PULLDOWN_DRIVE_LOW", "PULLUP_DRIVE_HIGH", 
-                                                                  "NO_PULL_DRIVE_LOW", "NO_PULL_DRIVE_HIGH"]
-                                                    phase_str = phase_names[param] if param < 4 else f"PHASE_{param}"
-                                                    print(f"        Conn {j}: [7] OTHER_PIN={other_pin}, [8] PARAM=Phase:{phase_str}, [9] TYPE=INTERNAL")
-                                                else:  # EXTERNAL
-                                                    print(f"        Conn {j}: [7] OTHER_PIN={other_pin}, [8] PARAM=DeviceID:{param}, [9] TYPE=EXTERNAL")
-                                    else:
-                                        print(f"      [6] CONNECTIONS: []")
-                                else:
-                                    print(f"    Pin {i}: {pin} (unexpected type)")
-                            
-                            print(f"Hash valid: {result['hash_valid']}")
+                            print(f"Received Chunk {data.get(0)} (Packet ID: {result['packet_id']})")
                             
                             # Process chunk in collector
                             collector.process_chunk(result)
                             
                             # Check if collection is complete and export CBOR
-                            if collector.is_complete():
-                                collector.print_connections_summary()
-                                collector.to_cbor()
+                            collector.is_complete()
                             
                             if result.get('ack_requested', 1):
                                 # Send ACK if hash is valid
@@ -321,7 +263,7 @@ def monitor_serial():
         stop_event = threading.Event()
         
         print("Starting concurrent monitoring...")
-        print("Press 's' to save")
+        print("Press 's' to save, 'r' to save raw XML")
         
         reader_thread = threading.Thread(
             target=serial_reader,
@@ -347,6 +289,10 @@ def monitor_serial():
                     cmd = sys.stdin.read(1)
                     if cmd == 's':
                         collector.manual_save()
+                    elif cmd == 'r':
+                        collector.save_raw_xml()
+                    elif cmd == 'q':
+                        break
                 
                 if not reader_thread.is_alive() or not processor_thread.is_alive():
                     print("❌ Thread died")

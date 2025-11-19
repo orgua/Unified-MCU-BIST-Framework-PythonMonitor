@@ -32,6 +32,7 @@ PIN_EVENT_TYPES = {
     22: "STEP_3_A_LOW",
     23: "STEP_3_B_HIGH",
     24: "STEP_3_B_LOW",
+    25: "PIN_IS_NATUTALLY_DISTURBED",
 }
 
 

@@ -23,20 +23,21 @@ CONNECTION_TYPE_INTERNAL = 0
 CONNECTION_TYPE_EXTERNAL = 1
 
 # Internal Connection Phases (KEY_CONNECTION_PARAMETER values for internal connections)
-PHASE_0_PULLDOWN_DRIVE_LOW = 0
-PHASE_1_PULLUP_DRIVE_HIGH = 1
-PHASE_2_NO_PULL_DRIVE_LOW = 2
-PHASE_3_NO_PULL_DRIVE_HIGH = 3
+PHASE_0_PULLDOWN = 0
+PHASE_1_PULLUP = 1
+PHASE_2_DRIVE_LOW = 2
+PHASE_3_DRIVE_HIGH = 3
 
 PHASE_NAMES = {
-    0: "PULLDOWN_DRIVE_LOW",
-    1: "PULLUP_DRIVE_HIGH",
-    2: "NO_PULL_DRIVE_LOW",
-    3: "NO_PULL_DRIVE_HIGH"
+    0: "PULLDOWN",
+    1: "PULLUP",
+    2: "DRIVE_LOW",
+    3: "DRIVE_HIGH"
 }
 
 HEADER_KEY_DEVICE_FAMILY = 1
 HEADER_KEY_TOTAL_CHUNKS = 2
+HEADER_KEY_NUMBER_SEEN_DEVICES = 6
 
 NUMBER_OF_EXPECTED_DEVICES_FOR_COMPLETION = 1
 
@@ -116,9 +117,11 @@ MSP430_PIN_NAMES = {
 def get_pin_name(device_family, pin_num):
     """Get the pin name for a given device family and pin number"""
     if "NRF" in str(device_family).upper():
-        return NRF52840_PIN_NAMES.get(pin_num, str(pin_num))
+        name = NRF52840_PIN_NAMES.get(pin_num)
+        return f"{pin_num}: {name}" if name else str(pin_num)
     elif "MSP" in str(device_family).upper():
-        return MSP430_PIN_NAMES.get(pin_num, str(pin_num))
+        name = MSP430_PIN_NAMES.get(pin_num)
+        return f"{pin_num}: {name}" if name else str(pin_num)
     else:
         return str(pin_num)
 
@@ -166,6 +169,8 @@ class DeviceDataCollector:
         self.output_file = None
         self.original_stdout = None
         self.device_uuid = None
+        self.expected_devices = 1
+        self.capture_started = False
     
     # ===== Data Processing Methods =====
     
@@ -182,6 +187,7 @@ class DeviceDataCollector:
         self.device_uuid = header_data.get(KEY_DEVICE_UUID, "UNKNOWN")
         
         self.current_device_family = device_family
+        self.expected_devices = header_data.get(HEADER_KEY_NUMBER_SEEN_DEVICES, 1)
         
         # Clear existing data for this device_family when new header received
         self.devices[device_family] = {
@@ -189,6 +195,7 @@ class DeviceDataCollector:
             'pins': [],
             'chunks_received': set(),
             'complete': False,
+            'saved': False,
             'uuid': self.device_uuid
         }
         print(f"🔄 Reset data for device_family {device_family}")
@@ -211,56 +218,82 @@ class DeviceDataCollector:
             events_raw = pin_entry.get(KEY_EVENTS, 0)
             events = merge_handshake_events(decode_event_type_one_hot(events_raw)) if events_raw else []
             
-            # Filter connections - remove WEAK naturally driven connections
-            filtered_connections = []
-            for c in pin_entry.get(KEY_CONNECTIONS, []):
-                conn_type = c.get(KEY_CONNECTION_TYPE, 0)
-                if conn_type == CONNECTION_TYPE_INTERNAL:
-                    phase = c.get(KEY_CONNECTION_PARAMETER, -1)
-                    if not self._should_mask_connection(events, phase):
-                        filtered_connections.append({
-                            KEY_OTHER_PIN: c.get(KEY_OTHER_PIN), 
-                            KEY_CONNECTION_PARAMETER: phase,
-                            KEY_CONNECTION_TYPE: conn_type
-                        })
-                else:
-                    filtered_connections.append({
-                        KEY_OTHER_PIN: c.get(KEY_OTHER_PIN), 
-                        KEY_CONNECTION_PARAMETER: c.get(KEY_CONNECTION_PARAMETER),
-                        KEY_CONNECTION_TYPE: conn_type
-                    })
-            
+            if "EXCEEDS_CONNECTION_LIMIT" in events:
+                pin_name = get_pin_name(self.current_device_family, pin_entry.get(KEY_PIN))
+                print(f"⚠️ WARNING: Pin {pin_name} exceeded connection limit!")
+
             device['pins'].append({
                 'pin': pin_entry.get(KEY_PIN),
                 'events': events,
-                'connections': filtered_connections
+                'connections': [{KEY_OTHER_PIN: c.get(KEY_OTHER_PIN), 
+                                KEY_CONNECTION_PARAMETER: c.get(KEY_CONNECTION_PARAMETER),
+                                KEY_CONNECTION_TYPE: c.get(KEY_CONNECTION_TYPE, 0)} 
+                               for c in pin_entry.get(KEY_CONNECTIONS, [])]
             })
         
         device['chunks_received'].add(chunk_id)
         device['complete'] = len(device['chunks_received']) == device['total_chunks']
+        
+        # Filter connections after all data is loaded
+        if device['complete']:
+            self._filter_weak_connections(self.current_device_family)
+        
         return True
+    
+    def _filter_weak_connections(self, device_family):
+        """Remove WEAK naturally driven connections after all pins are loaded"""
+        device = self.devices.get(device_family)
+        if not device:
+            return
+        
+        # Create mapping of pin number to events
+        pin_events = {pin['pin']: pin['events'] for pin in device['pins']}
+        
+        # Filter connections for each pin
+        for pin in device['pins']:
+            filtered_connections = []
+            for conn in pin['connections']:
+                conn_type = conn.get(KEY_CONNECTION_TYPE, 0)
+                if conn_type == CONNECTION_TYPE_INTERNAL:
+                    phase = conn.get(KEY_CONNECTION_PARAMETER, -1)
+                    other_pin = conn.get(KEY_OTHER_PIN)
+                    
+                    # Check if source or target pin should be masked
+                    source_masked = self._should_mask_connection(pin['events'], phase)
+                    target_events = pin_events.get(other_pin, [])
+                    target_masked = self._should_mask_connection(target_events, phase)
+                    
+                    # Keep connection only if neither is masked
+                    if not source_masked and not target_masked:
+                        filtered_connections.append(conn)
+                else:
+                    filtered_connections.append(conn)
+            
+            pin['connections'] = filtered_connections
     
     def get_all_devices(self):
         return self.devices
     
-    # ===== File Output Methods =====
     
-    def _start_output_capture(self):
+    def _start_output_capture(self, device_family=None, device_uuid=None):
         """Start capturing output to file"""
-        if self.device_uuid is None:
-            self.device_uuid = "UNKNOWN"
+        if device_uuid is None:
+            device_uuid = self.device_uuid if self.device_uuid else "UNKNOWN"
+        
+        if device_family is None:
+            device_family = self.current_device_family if self.current_device_family is not None else "UNKNOWN"
         
         import os
         os.makedirs("logs", exist_ok=True)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"logs/output_{self.device_uuid}_{timestamp}.txt"
+        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        filename = f"logs/output_{device_family}_{device_uuid}_{timestamp}.txt"
         
         self.output_file = open(filename, 'w', encoding='utf-8')
+        print(f"📝 Saving to: {filename}")
+        
         self.original_stdout = sys.stdout
         sys.stdout = TeeOutput(self.output_file)
-        
-        print(f"📝 Saving to: {filename}")
             
     def _stop_output_capture(self):
         """Stop capturing output to file"""
@@ -269,38 +302,59 @@ class DeviceDataCollector:
             self.output_file.close()
             print(f"✅ File saved")
     
+    def save_device_report(self, device_family):
+        """Save report for a specific device"""
+        device = self.devices.get(device_family)
+        if not device:
+            return
+            
+        self._start_output_capture(device_family, device.get('uuid'))
+        
+        if self.original_stdout:
+            self.original_stdout.write(f"✅ Collection complete for Device {device_family}\n")
+        
+        # Print connections summary (filtered for this device)
+        print("\n=== Pin Connections ===")
+        print(f"Device {device_family}:")
+        for pin in device['pins']:
+            pin_name = get_pin_name(device_family, pin['pin'])
+            for conn in pin['connections']:
+                conn_type = conn.get(KEY_CONNECTION_TYPE, 0)
+                param = conn.get(KEY_CONNECTION_PARAMETER, 0)
+                other_pin_name = get_pin_name(device_family, conn.get(KEY_OTHER_PIN))
+                
+                if conn_type == CONNECTION_TYPE_INTERNAL:
+                    phase_name = PHASE_NAMES.get(param, f"PHASE_{param}")
+                    print(f"  {pin_name} -> {other_pin_name} [{phase_name}]")
+                else:  # EXTERNAL
+                    print(f"  {pin_name} -> Device{param}:{other_pin_name} [EXT]")
+        print("="*23 + "\n")
+
+        # Externe Connection Matrizen (zu anderen Devices)
+        for other_device in sorted(self.devices.keys()):
+            if device_family != other_device:
+                self.print_connection_matrix(device_family, other_device)
+
+        # Alle 4 Phasen-Matrizen
+        self.print_all_phase_matrices(device_family)
+
+        # After connections and matrices, print events for all pins
+        self.print_all_pin_events(device_family)
+        
+        # Run pin force analysis for this device
+        self.run_pin_analysis(device_family)
+        
+        self._stop_output_capture()
+
     def is_complete(self):
-        complete = sum(1 for d in self.devices.values() if d['complete']) >= NUMBER_OF_EXPECTED_DEVICES_FOR_COMPLETION
-        if complete:
-            # Start capturing output to file
-            self._start_output_capture()
-            
-            print(f"✅ Collection complete")
-            
-            # Ausgabe aller Matrizen für alle Devices
-            # Print connections summary once
-            self.print_connections_summary()
-
-            # Externe Connection Matrizen (zu anderen Devices) und Phasen-Matrizen per Device
-            for device_family in sorted(self.devices.keys()):
-                # Externe Connection Matrizen (zu anderen Devices)
-                for other_device in sorted(self.devices.keys()):
-                    if device_family != other_device:
-                        matrix = self.create_connection_matrix(device_family, other_device)
-                        if matrix and any(any(row) for row in matrix):  # Nur ausgeben wenn Verbindungen existieren
-                            self.print_connection_matrix(device_family, other_device)
-
-                # Alle 4 Phasen-Matrizen
-                self.print_all_phase_matrices(device_family)
-
-            # After connections and matrices, print events for all pins
-            self.print_all_pin_events()
-            
-            # Run pin force analysis for all devices
-            self.run_pin_analysis()
-            
-            # Stop capturing output to file
-            self._stop_output_capture()
+        # Check for any completed but unsaved devices
+        for family, device in self.devices.items():
+            if device['complete'] and not device.get('saved', False):
+                self.save_device_report(family)
+                device['saved'] = True
+        
+        # Return true if ALL expected devices are complete (for legacy check)
+        return sum(1 for d in self.devices.values() if d['complete']) >= self.expected_devices
         
         return complete
     
@@ -312,9 +366,7 @@ class DeviceDataCollector:
         for device_family in sorted(self.devices.keys()):
             for other_device in sorted(self.devices.keys()):
                 if device_family != other_device:
-                    matrix = self.create_connection_matrix(device_family, other_device)
-                    if matrix and any(any(row) for row in matrix):
-                        self.print_connection_matrix(device_family, other_device)
+                    self.print_connection_matrix(device_family, other_device)
             self.print_all_phase_matrices(device_family)
         self.print_all_pin_events()
         self.run_pin_analysis()
@@ -340,29 +392,44 @@ class DeviceDataCollector:
                         print(f"  {pin_name} -> Device{param}:{other_pin_name} [EXT]")
         print("="*23 + "\n")
 
-    def print_all_pin_events(self):
-        """Print decoded events for all pins for all devices."""
+    def print_all_pin_events(self, device_family=None):
+        """Print decoded events for all pins for all devices or a specific one."""
         print("\n=== Pin Events ===")
-        for device_family, device_data in sorted(self.devices.items()):
-            print(f"Device {device_family}:")
+        
+        devices_to_print = [device_family] if device_family is not None else sorted(self.devices.keys())
+        
+        for family in devices_to_print:
+            if family not in self.devices:
+                continue
+                
+            device_data = self.devices[family]
+            print(f"Device {family}:")
             for pin in device_data['pins']:
-                pin_name = get_pin_name(device_family, pin['pin'])
+                pin_name = get_pin_name(family, pin['pin'])
                 events = pin.get('events', [])
                 if events:
                     print(f"  {pin_name}: {', '.join(events)}")
+                    if "EXCEEDS_CONNECTION_LIMIT" in events:
+                        print(f"  ⚠️  WARNING: Connection limit exceeded for this pin!")
                 else:
                     print(f"  {pin_name}: No events")
         print("="*23 + "\n")
     
-    def run_pin_analysis(self):
-        """Run pin force analysis for all devices."""
-        for device_family, device_data in sorted(self.devices.items()):
+    def run_pin_analysis(self, device_family=None):
+        """Run pin force analysis for all devices or a specific one."""
+        devices_to_analyze = [device_family] if device_family is not None else sorted(self.devices.keys())
+        
+        for family in devices_to_analyze:
+            if family not in self.devices:
+                continue
+                
+            device_data = self.devices[family]
             print(f"\n{'='*80}")
-            print(f"Pin Force Analysis - Device {device_family}")
+            print(f"Pin Force Analysis - Device {family}")
             print(f"{'='*80}")
             for pin_data in device_data['pins']:
                 pin_num = pin_data.get('pin', 'UNKNOWN')
-                pin_name = get_pin_name(device_family, pin_num)
+                pin_name = get_pin_name(family, pin_num)
                 events = pin_data.get('events', [])
                 from pin_analyzer import analyze_pin
                 result = analyze_pin(pin_name, events)
@@ -372,24 +439,31 @@ class DeviceDataCollector:
     # ===== Matrix Generation Methods =====
     
     def _should_mask_connection(self, events, phase):
-        """Mask connections for WEAK pins in specific phases"""
+        """Mask connections for Strength 1 and -1 pins in specific phases"""
         ev = set(events)
         
-        # Check if pin is naturally LOW or HIGH
-        naturally_low = 'STEP_1_A_LOW' in ev and 'STEP_1_B_LOW' in ev
-        naturally_high = 'STEP_1_A_HIGH' in ev and 'STEP_1_B_HIGH' in ev
+        # Strength 1 Pattern: 1, 1, 1, 0, 1, 0 (Naturally High, Weak)
+        is_strength_1 = all(x in ev for x in [
+            'STEP_1_A_HIGH', 'STEP_1_B_HIGH',
+            'STEP_2_A_HIGH', 'STEP_2_B_LOW',
+            'STEP_3_A_HIGH', 'STEP_3_B_LOW'
+        ])
         
-        # Check if pin is WEAK (S2:2/2, S3:2/2)
-        s2_follows = ('STEP_2_A_LOW' in ev, 'STEP_2_B_HIGH' in ev)
-        s3_follows = ('STEP_3_A_LOW' in ev, 'STEP_3_B_HIGH' in ev)
-        is_weak = sum(s2_follows) == 2 and sum(s3_follows) == 2
+        # Strength -1 Pattern: 0, 0, 1, 0, 1, 0 (Naturally Low, Weak)
+        is_strength_minus_1 = all(x in ev for x in [
+            'STEP_1_A_LOW', 'STEP_1_B_LOW',
+            'STEP_2_A_HIGH', 'STEP_2_B_LOW',
+            'STEP_3_A_HIGH', 'STEP_3_B_LOW'
+        ])
         
-        # Mask only if WEAK and naturally driven
-        if is_weak:
-            if naturally_low and phase in (0, 2):  # PULLDOWN/DRIVE_LOW phases
-                return True
-            if naturally_high and phase in (1, 3):  # PULLUP/DRIVE_HIGH phases
-                return True
+        # Mask if Strength 1 (Naturally High) and phase is PULLUP (1) or DRIVE_HIGH (3)
+        if is_strength_1 and phase in (1, 3):
+            return True
+            
+        # Mask if Strength -1 (Naturally Low) and phase is PULLDOWN (0) or DRIVE_LOW (2)
+        if is_strength_minus_1 and phase in (0, 2):
+            return True
+            
         return False
     
     def create_connection_matrix(self, controller_a, controller_b):
@@ -439,7 +513,7 @@ class DeviceDataCollector:
         if not pin_nums_a or not pin_nums_b:
             return
         
-        num_cols = 16 + 3 * len(pin_nums_b)
+        num_cols = 26 + 3 * len(pin_nums_b)
         print(f"\n{'='*num_cols}")
         print(f"External Connection Matrix: Device {controller_a} -> Device {controller_b}")
         print(f"{'='*num_cols}")
@@ -449,7 +523,7 @@ class DeviceDataCollector:
         
         for pin_a in pin_nums_a:
             pin_name_a = get_pin_name(controller_a, pin_a)
-            print(f"{pin_name_a[:15]:15}|", end="")
+            print(f"{pin_name_a[:25]:25}|", end="")
             if pin_a in pin_to_idx_a:
                 idx_a = pin_to_idx_a[pin_a]
                 for pin_b in pin_nums_b:
@@ -532,13 +606,13 @@ class DeviceDataCollector:
             return
         
         phase_names = {
-            0: "PULLDOWN_DRIVE_LOW",
-            1: "PULLUP_DRIVE_HIGH",
-            2: "NO_PULL_DRIVE_LOW",
-            3: "NO_PULL_DRIVE_HIGH"
+            0: "PULLDOWN",
+            1: "PULLUP",
+            2: "DRIVE_LOW",
+            3: "DRIVE_HIGH"
         }
         
-        num_cols = 16 + 3 * len(pin_nums)
+        num_cols = 26 + 3 * len(pin_nums)
         print(f"\n{'='*num_cols}")
         print(f"Phase {phase}: {phase_names.get(phase, f'PHASE_{phase}')} (Device {controller})")
         print(f"{'='*num_cols}")
@@ -547,7 +621,7 @@ class DeviceDataCollector:
         
         for pin_a in pin_nums:
             pin_name_a = get_pin_name(controller, pin_a)
-            print(f"{pin_name_a[:15]:15}|", end="")
+            print(f"{pin_name_a[:25]:25}|", end="")
             if pin_a in pin_to_idx:
                 idx_a = pin_to_idx[pin_a]
                 for pin_b in pin_nums:
@@ -571,8 +645,6 @@ class DeviceDataCollector:
         for phase in range(4):
             self.print_phase_matrix(controller, phase)
     
-    # ===== Export Methods =====
-    
     def to_cbor(self):
         
         devices = [{HEADER_KEY_DEVICE_FAMILY: f, 2: [{KEY_PIN: p['pin'], KEY_EVENTS: p['events'], 
@@ -580,7 +652,60 @@ class DeviceDataCollector:
                   for f, d in self.devices.items()]
         
         cbor_bytes = cbor2.dumps(devices)
-        b64 = base64.b64encode(cbor_bytes).decode('utf-8')
         print(f"SHA256: {hashlib.sha256(cbor_bytes).hexdigest()}")
         return cbor_bytes
+
+    def save_raw_xml(self):
+        """Save all collected data to an XML file with metadata"""
+        import xml.etree.ElementTree as ET
+        import socket
+        import os
+        
+        os.makedirs("raw_data", exist_ok=True)
+        
+        root = ET.Element("ShepperdTest")
+        
+        # Metadata
+        meta = ET.SubElement(root, "Metadata")
+        ET.SubElement(meta, "Timestamp").text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ET.SubElement(meta, "Computer").text = socket.gethostname()
+        try:
+            ET.SubElement(meta, "User").text = os.getlogin()
+        except:
+            ET.SubElement(meta, "User").text = "unknown"
+        
+        # Devices
+        devices_elem = ET.SubElement(root, "Devices")
+        
+        for family, device_data in self.devices.items():
+            dev_elem = ET.SubElement(devices_elem, "Device")
+            dev_elem.set("Family", str(family))
+            dev_elem.set("UUID", str(device_data.get('uuid', 'UNKNOWN')))
+            
+            # Create CBOR for this specific device
+            device_obj = {
+                HEADER_KEY_DEVICE_FAMILY: family, 
+                2: [{KEY_PIN: p['pin'], KEY_EVENTS: p['events'], 
+                     KEY_CONNECTIONS: p['connections']} for p in device_data['pins']]
+            }
+            
+            cbor_bytes = cbor2.dumps([device_obj])
+            b64_cbor = base64.b64encode(cbor_bytes).decode('utf-8')
+            
+            data_elem = ET.SubElement(dev_elem, "RawData")
+            data_elem.text = b64_cbor
+            data_elem.set("Encoding", "base64")
+            data_elem.set("Format", "CBOR")
+
+        # Save to file
+        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        filename = f"raw_data/raw_data_{timestamp}.xml"
+        
+        # Indent for pretty printing
+        if hasattr(ET, 'indent'):
+            ET.indent(root, space="  ", level=0)
+            
+        tree = ET.ElementTree(root)
+        tree.write(filename, encoding="utf-8", xml_declaration=True)
+        print(f"💾 Raw XML saved to: {filename}")
 
