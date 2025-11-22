@@ -11,7 +11,7 @@ from event_decoder import decode_result, format_event_list, merge_handshake_even
 from data_storage import DeviceDataCollector
 
 # Configuration
-PORT = "/dev/tty.usbmodem11102"
+PORT = "/dev/tty.usbmodem1102"
 BAUDRATE = 9600
 
 # Protocol identifiers (4 bytes each, little endian)

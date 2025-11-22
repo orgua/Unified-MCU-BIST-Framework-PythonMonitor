@@ -5,27 +5,42 @@ Pin Analyzer - Classifies pins based on 3-step force measurement
 
 def analyze_pin(pin_name, events):
     ev = set(events)
-    # Order: Stage 1 A/B, Stage 2 A/B, Stage 3 A/B
-    checks = [f"STEP_{s}_{p}" for s in "123" for p in "AB"]
-    
-    # 1=HIGH, 0=LOW
+    # Order: Stage 1 N/P, Stage 2 N/P, Stage 3 N/P
+    checks = [
+        "STEP_1_A", "STEP_1_B", "STEP_2_A", "STEP_2_B", "STEP_3_A", "STEP_3_B"
+    ]
+
+    # Helper to get value for each stage: 1=HIGH, 0=LOW, 'U'=Undefined
+    def get_val(stage, ev):
+        if f"{stage}_HIGH" in ev:
+            return 1
+        if f"{stage}_LOW" in ev:
+            return 0
+        return 'U'
+
     patterns = {
-    # Positive Forces (High-Side)
-    # A  B       A  B     A  B
-    3:  (1, 1,    1, 1,    1, 1), 
-    2:  (1, 1,    1, 1,    0, 1), 
-    1:  (1, 1,    0, 1,    0, 1), 
-    0:  (0, 1,    0, 1,    0, 1),  
-    # Negative Forces (Low-Side)
-    -1: (0, 0,    0, 1,    0, 1), 
-    -2: (0, 0,    0, 0,    0, 1), 
-    -3: (0, 0,    0, 0,    0, 0),
+        6:  (1, 1, 1, 1, 1, 1),
+        5:  (1, 1, 1, 1, 'U', 1),
+        4:  (1, 1, 1, 1, 0, 1),
+        3:  (1, 1, 'U', 1, 0, 1),
+        2:  (1, 1, 0, 1, 0, 1),
+        1:  ('U', 1, 0, 1, 0, 1),
+        0:  (0, 1, 0, 1, 0, 1),
+        -1: (0, 'U', 0, 1, 0, 1),
+        -2: (0, 0, 0, 1, 0, 1),
+        -3: (0, 0, 'U', 1, 0, 1),
+        -4: (0, 0, 0, 0, 0, 1),
+        -5: (0, 0, 0, 0, 'U', 1),
+        -6: (0, 0, 0, 0, 0, 0),
     }
-    for strength, bits in patterns.items():
-        if all((f"{c}_{'HIGH' if b else 'LOW'}" in ev) for c, b in zip(checks, bits)):
-            return f"{pin_name}: Strength {strength}"
-            
-    return f"{pin_name}: Undefined"
+
+    # Build actual values for this pin
+    actual = tuple(get_val(stage, ev) for stage in checks)
+
+    for strength, pattern in patterns.items():
+        if actual == pattern:
+            return strength
+    return None
 
 def analyze_all_pins(device_pins):
     return [analyze_pin(str(p.get('pin', '?')), p.get('events', [])) for p in device_pins]
