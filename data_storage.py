@@ -17,7 +17,20 @@ KEY_CONNECTIONS = 6
 KEY_OTHER_PIN = 7
 KEY_CONNECTION_PARAMETER = 8  # Device ID (external) or Phase (internal)
 KEY_CONNECTION_TYPE = 9
-KEY_DEVICE_UUID = 0  # UUID from header
+KEY_STREAM_NUMBER = 10
+
+# Header Keys
+HEADER_KEY_DEVICE_UUID = 0
+HEADER_KEY_DEVICE_FAMILY = 1
+HEADER_KEY_TOTAL_CHUNKS = 2
+HEADER_KEY_TOTAL_PINS = 3
+HEADER_KEY_ACTIVE_PINS = 4
+HEADER_KEY_HEADER_HASH = 5
+HEADER_KEY_NUMBER_SEEN_DEVICES = 6
+HEADER_KEY_SEEN_DEVICE_IDS = 7
+HEADER_KEY_ACK_REQUESTED = 8
+HEADER_KEY_VERSION = 9
+HEADER_KEY_EXPECTED_SESSIONS = 10
 
 # Connection Types
 CONNECTION_TYPE_INTERNAL = 0
@@ -37,10 +50,6 @@ PHASE_NAMES = {
     4: "ALLPULLUP_LOW",
     5: "ALLPULLDOWN_HIGH"
 }
-
-HEADER_KEY_DEVICE_FAMILY = 1
-HEADER_KEY_TOTAL_CHUNKS = 2
-HEADER_KEY_NUMBER_SEEN_DEVICES = 6
 
 NUMBER_OF_EXPECTED_DEVICES_FOR_COMPLETION = 1
 
@@ -199,12 +208,12 @@ class DeviceDataCollector:
         if device_family is None:
             return False
 
-        # Print received hash (Git commit hash)
-        git_commit_hash = header_data.get(9, None)
-        print(f"Empfangenes Git Commit Hash: {git_commit_hash}")
+        # Print received hash (Device Version)
+        git_commit_hash = header_data.get(HEADER_KEY_VERSION, None)
+        print(f"Received Device Version: {git_commit_hash}")
 
         # Get device UUID for filename
-        self.device_uuid = header_data.get(KEY_DEVICE_UUID, "UNKNOWN")
+        self.device_uuid = header_data.get(HEADER_KEY_DEVICE_UUID, "UNKNOWN")
 
         self.current_device_family = device_family
         self.expected_devices = header_data.get(HEADER_KEY_NUMBER_SEEN_DEVICES, 1)
@@ -212,14 +221,17 @@ class DeviceDataCollector:
         # Clear existing data for this device_family when new header received
         self.devices[device_family] = {
             'total_chunks': header_data.get(HEADER_KEY_TOTAL_CHUNKS, 0),
+            'expected_sessions': header_data.get(HEADER_KEY_EXPECTED_SESSIONS, 1),
             'pins': [],
-            'chunks_received': set(),
+            'received_sessions': {},  # session_id -> set of chunk_ids
+            'raw_header': header_result.get('raw_bytes', b''),
+            'raw_session_chunks': {}, # session_id -> {chunk_id -> raw_bytes}
             'complete': False,
             'saved': False,
             'uuid': self.device_uuid,
             'git_commit': git_commit_hash
         }
-        print(f"🔄 Reset data for device_family {device_family} (Git commit: {git_commit_hash})")
+        print(f"🔄 Reset data for device_family {device_family} (Device Version: {git_commit_hash})")
         return True
     
     def process_chunk(self, chunk_result):
@@ -232,8 +244,17 @@ class DeviceDataCollector:
             return False
         
         chunk_id = chunk_data.get(KEY_CHUNK_ID, chunk_result.get('packet_id', -1))
-        if chunk_id in device['chunks_received']:
+        session_id = chunk_data.get(KEY_STREAM_NUMBER, 0)
+        
+        if session_id not in device['received_sessions']:
+            device['received_sessions'][session_id] = set()
+            device['raw_session_chunks'][session_id] = {}
+            
+        if chunk_id in device['received_sessions'][session_id]:
             return False
+        
+        # Store raw chunk bytes
+        device['raw_session_chunks'][session_id][chunk_id] = chunk_result.get('raw_bytes', b'')
         
         for pin_entry in chunk_data.get(KEY_PINS, []):
             events_raw = pin_entry.get(KEY_EVENTS, 0)
@@ -243,18 +264,38 @@ class DeviceDataCollector:
                 pin_name = get_pin_name(self.current_device_family, pin_entry.get(KEY_PIN))
                 print(f"⚠️ WARNING: Pin {pin_name} exceeded connection limit!")
 
-            device['pins'].append({
-                'pin': pin_entry.get(KEY_PIN),
-                'events': events,
-                'events_mask': events_raw,
-                'connections': [{KEY_OTHER_PIN: c.get(KEY_OTHER_PIN), 
+            pin_num = pin_entry.get(KEY_PIN)
+            new_connections = [{KEY_OTHER_PIN: c.get(KEY_OTHER_PIN), 
                                 KEY_CONNECTION_PARAMETER: c.get(KEY_CONNECTION_PARAMETER),
                                 KEY_CONNECTION_TYPE: c.get(KEY_CONNECTION_TYPE, 0)} 
                                for c in pin_entry.get(KEY_CONNECTIONS, [])]
-            })
+
+            # Find existing pin entry or create new one
+            existing_pin = next((p for p in device['pins'] if p['pin'] == pin_num), None)
+            
+            if existing_pin:
+                # Overwrite events and mask with latest session data
+                existing_pin['events'] = events
+                existing_pin['events_mask'] = events_raw
+                # Append new connections
+                existing_pin['connections'].extend(new_connections)
+            else:
+                device['pins'].append({
+                    'pin': pin_num,
+                    'events': events,
+                    'events_mask': events_raw,
+                    'connections': new_connections
+                })
         
-        device['chunks_received'].add(chunk_id)
-        device['complete'] = len(device['chunks_received']) == device['total_chunks']
+        device['received_sessions'][session_id].add(chunk_id)
+        
+        # Check completion: All expected sessions must have all chunks
+        sessions_done = 0
+        for s_id in range(device['expected_sessions']):
+            if s_id in device['received_sessions'] and len(device['received_sessions'][s_id]) == device['total_chunks']:
+                sessions_done += 1
+        
+        device['complete'] = (sessions_done == device['expected_sessions'])
         
         # Filter connections after all data is loaded
         if device['complete']:
@@ -336,7 +377,7 @@ class DeviceDataCollector:
             self.original_stdout.write(f"✅ Collection complete for Device {device_family}\n")
 
         # Print Git commit version
-        print(f"Git Commit Version: {device.get('git_commit', 'UNKNOWN')}")
+        print(f"Device Version: {device.get('git_commit', 'UNKNOWN')}")
 
         # --- Collect all matrix and force analysis binary data ---
         combined_bytes = bytearray()
@@ -365,8 +406,6 @@ class DeviceDataCollector:
         combined_bytes += bytearray([s & 0xFF for s in hash_strengths])
         combined_hash = hashlib.sha256(combined_bytes).hexdigest()
         print(f"HASH: {combined_hash}")
-        if self.output_file:
-            self.output_file.write(f"HASH: {combined_hash}\n")
 
         # Print connections summary (filtered for this device)
         print("\n=== Pin Connections ===")
@@ -610,21 +649,33 @@ class DeviceDataCollector:
             dev_elem.set("UUID", str(device_data.get('uuid', 'UNKNOWN')))
             dev_elem.set("GitCommit", str(device_data.get('git_commit', 'UNKNOWN')))
 
-            # Concatenate raw CBOR header and all chunk CBORs for this device
-            raw_cbor_bytes = b''
-            # Assume device_data['raw_header'] and device_data['raw_chunks'] are set elsewhere
-            if 'raw_header' in device_data:
-                raw_cbor_bytes += device_data['raw_header']
-            if 'raw_chunks' in device_data:
-                for chunk_bytes in device_data['raw_chunks']:
-                    raw_cbor_bytes += chunk_bytes
+            # Global packet ID counter for this device
+            packet_id = 0
 
-            # If not present, fallback to empty
-            b64_cbor = base64.b64encode(raw_cbor_bytes).decode('utf-8') if raw_cbor_bytes else ''
-            data_elem = ET.SubElement(dev_elem, "RawData")
-            data_elem.text = b64_cbor
-            data_elem.set("Encoding", "base64")
-            data_elem.set("Format", "CBOR")
+            # Header
+            if 'raw_header' in device_data and device_data['raw_header']:
+                header_elem = ET.SubElement(dev_elem, "RawData")
+                header_elem.set("Type", "Header")
+                header_elem.set("Session", "0")
+                header_elem.set("Id", str(packet_id))
+                header_elem.set("Encoding", "base64")
+                header_elem.text = base64.b64encode(device_data['raw_header']).decode('utf-8')
+                packet_id += 1
+            
+            # Chunks
+            if 'raw_session_chunks' in device_data:
+                for session_id in sorted(device_data['raw_session_chunks'].keys()):
+                    chunks = device_data['raw_session_chunks'][session_id]
+                    for chunk_id in sorted(chunks.keys()):
+                        chunk_elem = ET.SubElement(dev_elem, "RawData")
+                        chunk_elem.set("Type", "Chunk")
+                        chunk_elem.set("Session", str(session_id))
+                        chunk_elem.set("Id", str(packet_id))
+                        chunk_elem.set("ChunkId", str(chunk_id))
+                        chunk_elem.set("Encoding", "base64")
+                        chunk_elem.text = base64.b64encode(chunks[chunk_id]).decode('utf-8')
+                        packet_id += 1
+
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         filename = f"raw_data/raw_data_{timestamp}.xml"
         if hasattr(ET, 'indent'):

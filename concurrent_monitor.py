@@ -71,7 +71,8 @@ def parse_header_packet(hex_data):
             "data": decoded,
             "hash_valid": hash_valid,
             "received_hash": received_hash,
-            "calculated_hash": calculated_hash   
+            "calculated_hash": calculated_hash,
+            "raw_bytes": cbor_bytes
         }
     except Exception as e:
         print(f"Parse header error: {e}")
@@ -110,7 +111,8 @@ def parse_chunk_packet(hex_data):
             "data": decoded,
             "hash_valid": hash_valid,
             "received_hash": received_hash,
-            "calculated_hash": calculated_hash
+            "calculated_hash": calculated_hash,
+            "raw_bytes": cbor_bytes
         }
     except Exception as e:
         print(f"Parse chunk error: {e}")
@@ -193,6 +195,7 @@ def packet_processor(ser, data_queue, stop_event, collector):
                         # Debug: Print CBOR structure with keys
                         data = result.get('data', {})
                         print(f"CBOR Header: Device Family {data.get(1)}, Total Chunks {data.get(2)}")
+                        print(f"📦 CBOR Header Data: {data}")
                         
                         # Process header in collector
                         collector.process_header(result)
@@ -221,6 +224,7 @@ def packet_processor(ser, data_queue, stop_event, collector):
                             # Debug: Print CBOR structure with keys
                             data = result.get('data', {})
                             print(f"Received Chunk {data.get(0)} (Packet ID: {result['packet_id']})")
+                            print(f"📦 CBOR Data: {data}")
                             
                             # Process chunk in collector
                             collector.process_chunk(result)
