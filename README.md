@@ -1,6 +1,6 @@
 # TestFramework Serial Monitor
 
-A specialized serial monitor and analysis tool for Shepherd targets. It handles real-time data monitoring, matrix calculations, and XML data management.
+A serial monitor and analysis too. It handles real-time data monitoring, matrix calculations, and XML data management.
 
 ## Installation & Setup
 
