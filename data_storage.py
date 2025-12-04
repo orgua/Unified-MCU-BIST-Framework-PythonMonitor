@@ -3,6 +3,7 @@ import pandas as pd
 
 from event_decoder import decode_event_type_one_hot, PIN_EVENT_TYPES
 from pin_analyzer import analyze_all_pins, analyze_pin
+from phase_masking import PhaseMasking
 import base64
 import hashlib
 import cbor2
@@ -315,7 +316,7 @@ class DeviceDataCollector:
         return True
     
     def _filter_weak_connections(self, device_family):
-        """Mark connections that are disturbed"""
+        """Mark connections that are disturbed and apply phase masking"""
         device = self.devices.get(device_family)
         if not device:
             return
@@ -343,6 +344,45 @@ class DeviceDataCollector:
                         conn['masked'] = False
                 else:
                     conn['masked'] = False
+
+    def _apply_phase_masking(self, device_family):
+        """Apply phase masking per connection based on phases present for each specific directional connection"""
+        device = self.devices.get(device_family)
+        if not device:
+            return
+        
+        # Collect all connections and group by directional pin pairs
+        connection_pairs = {}
+        all_connections = []
+        
+        # First pass: collect all connections and group by directional pin pairs
+        for pin in device['pins']:
+            for conn in pin['connections']:
+                if conn.get(KEY_CONNECTION_TYPE, 0) == CONNECTION_TYPE_INTERNAL:
+                    source_pin = pin['pin']
+                    target_pin = conn.get(KEY_OTHER_PIN)
+                    phase = conn.get(KEY_CONNECTION_PARAMETER, -1)
+                    
+                    if 0 <= phase <= 5:
+                        # Create directional pin pair key (source -> target)
+                        pin_pair = (source_pin, target_pin)
+                        
+                        if pin_pair not in connection_pairs:
+                            connection_pairs[pin_pair] = set()
+                        
+                        connection_pairs[pin_pair].add(phase)
+                        all_connections.append((conn, pin_pair, phase))
+        
+        # Second pass: apply masking based on phases available for each directional connection
+        for conn, pin_pair, phase in all_connections:
+            pair_phases = connection_pairs[pin_pair]
+            
+            if PhaseMasking.should_keep_phase(phase, pair_phases):
+                conn['phase_masked'] = False
+            else:
+                conn['phase_masked'] = True
+        
+        # Phase masking complete
     
     def get_all_devices(self):
         return self.devices
@@ -647,11 +687,15 @@ class DeviceDataCollector:
                 if conn_type == CONNECTION_TYPE_INTERNAL:
                     conn_phase = conn.get(KEY_CONNECTION_PARAMETER, -1)
                     pin_name_b = get_pin_name(controller, conn.get(KEY_OTHER_PIN))
+                                        
                     if conn_phase == phase and pin_name_b in labels:
                         if pin_works:
                             is_masked = conn.get('masked', False)
+                            is_phase_masked = conn.get('phase_masked', False)
                             if not is_masked:
                                 df.at[pin_name_a, pin_name_b] = 1
+                            if  is_phase_masked:
+                                df.at[pin_name_a, pin_name_b] = 3
                             elif include_masked:
                                 df.at[pin_name_a, pin_name_b] = 2
         return df
@@ -739,6 +783,10 @@ class DeviceDataCollector:
         base_dir = f"visualization/viz_{timestamp}"
         os.makedirs(base_dir, exist_ok=True)
         print(f"Generating visualizations in: {base_dir}")
+
+        # Apply phase masking before visualization
+        for device_family in sorted(self.devices.keys()):
+            self._apply_phase_masking(device_family)
 
         for device_family in sorted(self.devices.keys()):
             # External connection matrices
