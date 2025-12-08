@@ -19,9 +19,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+test = [
+    "pytest",
+    #"pytest-click",
+    "coverage",
+]
+
 dev = [
+    "testsoftware-monitor[test]",
     "pre-commit",
     "pre-commit-uv", # check with `pre-commit --version`
+    "pandas-stubs",  # for pyright with pandas
 ]
 
 [build-system]
