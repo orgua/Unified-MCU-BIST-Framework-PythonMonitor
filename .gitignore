@@ -1,7 +1,11 @@
 /logs/
 /raw_data/
 /visualization/
-.vscode/
+.eggs/
+build/
+dist/
+*.egg-info/
+*.lock
 .DS_Store
 __pycache__/
 *.pyc
