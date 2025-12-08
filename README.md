@@ -4,7 +4,15 @@ A serial monitor and analysis too. It handles real-time data monitoring, matrix 
 
 ## Installation & Setup
 
-This project uses **Poetry** for dependency management and virtual environments.
+This project uses can be installed via
+
+```bass
+pip install .
+```
+
+It is recommended to use a tool like uv, poetry or pipenv to work inside a virtual environment:
+
+**Poetry** for dependency management and virtual environments.
 
 1.  **Install dependencies:**
 
@@ -34,7 +42,7 @@ Ensure your virtual environment is active (via `poetry shell`) or prepend `poetr
 Connects to the serial port defined in `concurrent_monitor.py`.
 
 ```bash
-python main.py
+python concurrent_monitor.py
 ```
 
 ### 2\. File Analysis Mode
@@ -42,7 +50,7 @@ python main.py
 Loads and analyzes a previously saved XML dataset.
 
 ```bash
-python main.py raw_data/my_data.xml
+python concurrent_monitor.py raw_data/my_data.xml
 ```
 
 ## Interactive Commands
@@ -62,3 +70,17 @@ The main processing occurs in `data_storage.py` and includes:
   * **Visualization:** Data display and rendering.
   * **I/O:** Import and export functionality for XML files.
   * **Filtering:** Data filter functions.
+
+## Tooling
+
+Linters, formatters and other tooling can be run via
+
+```bash
+pre-commit run -a
+```
+
+If not already installed, you can add the `dev`-flavor of this package, i.e.
+
+```bash
+pip install testsoftware-monitor[dev]
+```
