@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Event Decoder for CBOR Serial Monitor"""
 
 # Pin Event Type definitions (indexes must match device enum)

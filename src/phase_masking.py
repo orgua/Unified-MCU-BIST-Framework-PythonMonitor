@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Phase Masking - Centralized phase filtering logic for connections and matrices
 """

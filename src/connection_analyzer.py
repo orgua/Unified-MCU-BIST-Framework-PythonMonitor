@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Connection Analyzer - Analyzes pin connections and creates coordinate system vectors
 """
