@@ -46,7 +46,7 @@ def cli_callback(*, verbose: bool = verbose_opt_t) -> None:
 @cli.command()
 def version() -> None:
     """Print version-infos (combinable with -v)."""
-    log.info("testsoftware-monitor v%s", metadata.version("testsoftware_monitor"))
+    log.info("BISTMon v%s", metadata.version("bistmon"))
     log.debug("Python v%s", sys.version)
 
     for package in ["cbor2", "typer", "click"]:

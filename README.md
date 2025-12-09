@@ -87,5 +87,5 @@ pre-commit run -a
 If not already installed, you can add the `dev`-flavor of this package, i.e.
 
 ```bash
-pip install testsoftware-monitor[dev]
+pip install .[dev]
 ```
