@@ -3,8 +3,9 @@
 from collections.abc import Mapping
 from collections.abc import Sequence
 
-from bistmon.logger import log
 from typing_extensions import deprecated
+
+from .logger import log
 
 # Pin Event Type definitions (indexes must match device enum)
 PIN_EVENT_TYPES: Mapping[int, str] = {

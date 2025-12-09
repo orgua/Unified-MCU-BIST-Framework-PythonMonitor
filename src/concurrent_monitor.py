@@ -7,9 +7,10 @@ from pathlib import Path
 
 import cbor2
 import crcmod
-from bistmon.data_storage import DeviceDataCollector
-from bistmon.logger import log
 from serial import Serial
+
+from .data_storage import DeviceDataCollector
+from .logger import log
 
 # Protocol identifiers (4 bytes each, little endian)
 HEADER_START: bytes = bytes([0x0C, 0x0B, 0x0A, 0x09])

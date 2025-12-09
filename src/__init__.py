@@ -1,6 +1,6 @@
-from bistmon.cli import file
-from bistmon.cli import list_ports
-from bistmon.cli import serial
-from bistmon.logger import log
+from .cli import list_ports
+from .cli import process_file
+from .cli import process_serial
+from .logger import log
 
-__all__ = ["file", "list_ports", "log", "serial"]
+__all__ = ["list_ports", "log", "process_file", "process_serial"]

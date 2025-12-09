@@ -1,5 +1,5 @@
-from bistmon import concurrent_monitor
+from bistmon import process_serial
 
 print("Starting Serial Monitor")
 
-concurrent_monitor.monitor_serial("/dev/tty.usbmodem11102")
+process_serial("/dev/tty.usbmodem11102")

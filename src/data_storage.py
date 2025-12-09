@@ -7,19 +7,20 @@ from pathlib import Path
 
 import cbor2
 import pandas as pd
-from bistmon.config_framework import PHASE_NAMES
-from bistmon.config_framework import ConnectionType
-from bistmon.config_framework import FrameworkKey
-from bistmon.config_framework import HeaderKey
-from bistmon.config_targets import get_all_pins_sorted
-from bistmon.config_targets import get_pin_name
-from bistmon.connection_analyzer import create_vector_plots
-from bistmon.connection_analyzer import print_vectors
-from bistmon.event_decoder import PIN_EVENT_TYPES
-from bistmon.event_decoder import decode_event_type_one_hot
-from bistmon.logger import log
-from bistmon.phase_masking import keep_phase
-from bistmon.pin_analyzer import analyze_pin
+
+from .config_framework import PHASE_NAMES
+from .config_framework import ConnectionType
+from .config_framework import FrameworkKey
+from .config_framework import HeaderKey
+from .config_targets import get_all_pins_sorted
+from .config_targets import get_pin_name
+from .connection_analyzer import create_vector_plots
+from .connection_analyzer import print_vectors
+from .event_decoder import PIN_EVENT_TYPES
+from .event_decoder import decode_event_type_one_hot
+from .logger import log
+from .phase_masking import keep_phase
+from .pin_analyzer import analyze_pin
 
 
 class TeeOutput:

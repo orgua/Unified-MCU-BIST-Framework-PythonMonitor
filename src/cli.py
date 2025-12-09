@@ -7,11 +7,12 @@ from types import FrameType
 from typing import Annotated
 
 import typer
-from bistmon.concurrent_monitor import monitor_serial
-from bistmon.concurrent_monitor import offline_mode
-from bistmon.helper_serial import serial_port_list
-from bistmon.logger import increase_verbose_level
-from bistmon.logger import log
+
+from .concurrent_monitor import monitor_serial
+from .concurrent_monitor import offline_mode
+from .helper_serial import serial_port_list
+from .logger import increase_verbose_level
+from .logger import log
 
 cli = typer.Typer(help="A serial monitor and analysis tool")
 
@@ -52,8 +53,8 @@ def version() -> None:
         log.debug("%s v%s", package, metadata.version(package))
 
 
-@cli.command()
-def file(path: Path) -> None:
+@cli.command("file")
+def process_file(path: Path) -> None:
     """Process stored data offline."""
     offline_mode(path)
 
@@ -65,10 +66,10 @@ def list_ports() -> None:
     log.info("Available Ports: %s", serial_ports)
 
 
-@cli.command()
-def serial(
+@cli.command("serial")
+def process_serial(
     serial_ports: Annotated[
-        list[str] | None, typer.Option(help="will capture every port when omitted")
+        list[str] | str | None, typer.Option(help="will capture every port when omitted")
     ] = None,
 ) -> None:
     """Process live data coming from serial port."""
