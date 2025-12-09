@@ -55,7 +55,7 @@ bistmon serial tty.usbmodem11102
 Loads and analyzes a previously saved XML dataset.
 
 ```bash
-bistmon load ./raw_data/my_data.xml
+bistmon file ./raw_data/my_data.xml
 ```
 
 ## Interactive Commands

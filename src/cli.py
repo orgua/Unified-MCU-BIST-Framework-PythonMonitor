@@ -7,12 +7,11 @@ from types import FrameType
 from typing import Annotated
 
 import typer
-
-from .concurrent_monitor import monitor_serial
-from .concurrent_monitor import offline_mode
-from .helper_serial import serial_port_list
-from .logger import increase_verbose_level
-from .logger import log
+from bistmon.concurrent_monitor import monitor_serial
+from bistmon.concurrent_monitor import offline_mode
+from bistmon.helper_serial import serial_port_list
+from bistmon.logger import increase_verbose_level
+from bistmon.logger import log
 
 cli = typer.Typer(help="A serial monitor and analysis tool")
 
@@ -54,8 +53,8 @@ def version() -> None:
 
 
 @cli.command()
-def load(path: Path) -> None:
-    """Process stored data."""
+def file(path: Path) -> None:
+    """Process stored data offline."""
     offline_mode(path)
 
 

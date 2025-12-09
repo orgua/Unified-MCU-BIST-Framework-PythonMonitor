@@ -7,19 +7,19 @@ from pathlib import Path
 
 import cbor2
 import pandas as pd
-
-from .config_framework import PHASE_NAMES
-from .config_framework import ConnectionType
-from .config_framework import FrameworkKey
-from .config_framework import HeaderKey
-from .config_targets import get_all_pins_sorted
-from .config_targets import get_pin_name
-from .connection_analyzer import create_vector_plots
-from .connection_analyzer import print_vectors
-from .event_decoder import PIN_EVENT_TYPES
-from .event_decoder import decode_event_type_one_hot
-from .phase_masking import keep_phase
-from .pin_analyzer import analyze_pin
+from bistmon.config_framework import PHASE_NAMES
+from bistmon.config_framework import ConnectionType
+from bistmon.config_framework import FrameworkKey
+from bistmon.config_framework import HeaderKey
+from bistmon.config_targets import get_all_pins_sorted
+from bistmon.config_targets import get_pin_name
+from bistmon.connection_analyzer import create_vector_plots
+from bistmon.connection_analyzer import print_vectors
+from bistmon.event_decoder import PIN_EVENT_TYPES
+from bistmon.event_decoder import decode_event_type_one_hot
+from bistmon.logger import log
+from bistmon.phase_masking import keep_phase
+from bistmon.pin_analyzer import analyze_pin
 
 
 class TeeOutput:
@@ -51,12 +51,12 @@ class DeviceDataCollector:
     # ===== Helper Methods =====
     def _save_matrix(self, df, title=None, filename=None):
         if title:
-            print(f"\n=== {title} ===")
+            log.info(f"\n=== {title} ===")
             # Print full matrix without column headers and without truncation/ellipsis
             with pd.option_context(
                 "display.max_rows", None, "display.max_columns", None, "display.width", None
             ):
-                print(df.to_string(header=False))
+                log.info(df.to_string(header=False))
         if filename:
             df.to_csv(filename)
         return df
@@ -89,7 +89,7 @@ class DeviceDataCollector:
         plt.tight_layout()
         plt.savefig(path_file, format="pdf", bbox_inches="tight")
         plt.close()
-        print(f"  Saved: {path_file}")
+        log.debug(f"  Saved: {path_file}")
 
     # ===== Data Processing Methods =====
 
@@ -150,7 +150,7 @@ class DeviceDataCollector:
 
             if "EXCEEDS_CONNECTION_LIMIT" in events:
                 pin_name = get_pin_name(self.current_device_family, pin_entry.get(FrameworkKey.PIN))
-                print(f"WARNING: Pin {pin_name} exceeded connection limit!")
+                log.warning(f"WARNING: Pin {pin_name} exceeded connection limit!")
 
             pin_num = pin_entry.get(FrameworkKey.PIN)
             new_connections = [
@@ -275,11 +275,11 @@ class DeviceDataCollector:
             else:
                 device_uuid = "UNKNOWN"
 
-        timestamp = datetime.now(tz=timezone.UTC).strftime("%Y_%m_%d_%H_%M_%S")
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y_%m_%d_%H_%M_%S")
         file = Path().cwd() / f"logs/output_{device_family}_{device_uuid}_{timestamp}.txt"
         file.parent.mkdir(parents=True, exist_ok=True)
         self.output_file = file.open("w", encoding="utf-8")
-        print(f"Saving to: {file}")
+        log.debug(f"Saving to: {file}")
 
         self.original_stdout = sys.stdout
         sys.stdout = TeeOutput(self.output_file)
@@ -289,7 +289,7 @@ class DeviceDataCollector:
         if self.output_file:
             sys.stdout = self.original_stdout
             self.output_file.close()
-            print("File saved")
+            log.debug("File saved")
 
     def save_device_report(self, device_family):
         """Save report for a specific device"""
@@ -303,7 +303,7 @@ class DeviceDataCollector:
             self.original_stdout.write(f"Collection complete for Device {device_family}\n")
 
         # Print Git commit version
-        print(f"Device Version: {device.get('git_commit', 'UNKNOWN')}")
+        log.debug(f"Device Version: {device.get('git_commit', 'UNKNOWN')}")
 
         # --- Collect all matrix and force analysis binary data ---
         combined_bytes = bytearray()
@@ -334,11 +334,11 @@ class DeviceDataCollector:
         hash_strengths = [0 if s is None else int(s) for s in strengths]
         combined_bytes += bytearray([s & 0xFF for s in hash_strengths])
         combined_hash = hashlib.sha256(combined_bytes).hexdigest()
-        print(f"HASH: {combined_hash}")
+        log.info(f"HASH: {combined_hash}")
 
         # Print connections summary (filtered for this device)
-        print("\n=== Pin Connections ===")
-        print(f"Device {device_family}:")
+        log.info("\n=== Pin Connections ===")
+        log.info(f"Device {device_family}:")
         for pin in device["pins"]:
             pin_name = get_pin_name(device_family, pin["pin"])
             for conn in pin["connections"]:
@@ -350,10 +350,10 @@ class DeviceDataCollector:
 
                 if conn_type == ConnectionType.INTERNAL:
                     phase_name = PHASE_NAMES.get(param, f"PHASE_{param}")
-                    print(f"  {pin_name} -> {other_pin_name} [{phase_name}]")
+                    log.info(f"  {pin_name} -> {other_pin_name} [{phase_name}]")
                 else:  # EXTERNAL
-                    print(f"  {pin_name} -> Device{param}:{other_pin_name} [EXT]")
-        print("=" * 23 + "\n")
+                    log.info(f"  {pin_name} -> Device{param}:{other_pin_name} [EXT]")
+        log.info("=" * 23 + "\n")
 
         # External connection matrices (to other devices)
         for other_device in sorted(self.devices.keys()):
@@ -381,7 +381,7 @@ class DeviceDataCollector:
     def manual_save(self):
         """Manual save triggered by 's' command"""
         self._start_output_capture("ALL", "DEVICES")
-        print("Manual save")
+        log.info("Manual save")
         self.print_connections_summary()
         for device_family in sorted(self.devices.keys()):
             for other_device in sorted(self.devices.keys()):
@@ -397,9 +397,9 @@ class DeviceDataCollector:
         self._stop_output_capture()
 
     def print_connections_summary(self):
-        print("\n=== Pin Connections ===")
+        log.info("\n=== Pin Connections ===")
         for device_family, device_data in sorted(self.devices.items()):
-            print(f"Device {device_family}:")
+            log.info(f"Device {device_family}:")
             for pin in device_data["pins"]:
                 pin_name = get_pin_name(device_family, pin["pin"])
                 for conn in pin["connections"]:
@@ -410,14 +410,14 @@ class DeviceDataCollector:
                     other_pin_name = get_pin_name(device_family, conn.get(FrameworkKey.OTHER_PIN))
                     if conn_type == ConnectionType.INTERNAL:
                         phase_name = PHASE_NAMES.get(param, f"PHASE_{param}")
-                        print(f"  {pin_name} -> {other_pin_name} [{phase_name}]")
+                        log.info(f"  {pin_name} -> {other_pin_name} [{phase_name}]")
                     else:  # EXTERNAL
-                        print(f"  {pin_name} -> Device{param}:{other_pin_name} [EXT]")
-        print("=" * 23 + "\n")
+                        log.info(f"  {pin_name} -> Device{param}:{other_pin_name} [EXT]")
+        log.info("=" * 23 + "\n")
 
     def print_all_pin_events(self, device_family=None):
         """Print decoded events for all pins for all devices or a specific one."""
-        print("\n=== Pin Events ===")
+        log.info("\n=== Pin Events ===")
 
         devices_to_print = (
             [device_family] if device_family is not None else sorted(self.devices.keys())
@@ -428,18 +428,18 @@ class DeviceDataCollector:
                 continue
 
             device_data = self.devices[family]
-            print(f"Device {family}:")
+            log.info(f"Device {family}:")
             for pin in device_data["pins"]:
                 pin_name = get_pin_name(family, pin["pin"])
                 events = pin.get("events", [])
                 mask = pin.get("events_mask", 0)
                 if events:
-                    print(f"  {pin_name}: {', '.join(events)} (Mask: {mask})")
+                    log.info(f"  {pin_name}: {', '.join(events)} (Mask: {mask})")
                     if "EXCEEDS_CONNECTION_LIMIT" in events:
-                        print("  WARNING: Connection limit exceeded for this pin!")
+                        log.warning("  WARNING: Connection limit exceeded for this pin!")
                 else:
-                    print(f"  {pin_name}: No events (Mask: {mask})")
-        print("=" * 23 + "\n")
+                    log.info(f"  {pin_name}: No events (Mask: {mask})")
+        log.info("=" * 23 + "\n")
 
     def run_pin_analysis(self, device_family=None, precalculated_strengths=None):
         """Run pin force analysis for all devices or a specific one."""
@@ -465,17 +465,17 @@ class DeviceDataCollector:
                         strength = analyze_pin(events)
                     strengths.append(strength)
 
-            print(f"\n{'=' * 80}")
-            print(f"Pin Force Analysis - Device {family}")
-            print(f"{'=' * 80}")
+            log.info(f"\n{'=' * 80}")
+            log.info(f"External Drive-Strength of Pins - Device {family}")
+            log.info(f"{'=' * 80}")
             for pin_data, strength in zip(device_data["pins"], strengths, strict=True):
                 pin_num = pin_data.get("pin", "UNKNOWN")
                 pin_name = get_pin_name(family, pin_num)
                 if strength is not None:
-                    print(f"  {pin_name}: {strength}")
+                    log.info(f"  {pin_name}: {strength}")
                 else:
-                    print(f"  {pin_name}: Undefined")
-            print(f"{'=' * 80}\n")
+                    log.info(f"  {pin_name}: Undefined")
+            log.info(f"{'=' * 80}\n")
 
     def _should_mask_connection(self, events, phase):
         # Use stored strength if available, otherwise calculate
@@ -498,7 +498,7 @@ class DeviceDataCollector:
 
     def create_connection_matrix(self, controller_a, controller_b):
         if controller_a not in self.devices or controller_b not in self.devices:
-            print(f"Controller {controller_a} or {controller_b} not found")
+            log.error(f"Controller {controller_a} or {controller_b} not found")
             return None
         device_a = self.devices[controller_a]
         device_b = self.devices[controller_b]
@@ -531,10 +531,10 @@ class DeviceDataCollector:
 
     def create_phase_matrix(self, controller, phase):
         if controller not in self.devices:
-            print(f"Controller {controller} not found")
+            log.error(f"Controller {controller} not found")
             return None
         if not 0 <= phase <= 5:
-            print(f"Invalid phase {phase}. Must be between 0 and 5")
+            log.error(f"Invalid phase {phase}. Must be between 0 and 5")
             return None
         device = self.devices[controller]
         pins = [pin["pin"] for pin in device["pins"]]
@@ -600,7 +600,7 @@ class DeviceDataCollector:
 
         root = ET.Element("ShepherdTest")
         meta = ET.SubElement(root, "Metadata")
-        ET.SubElement(meta, "Timestamp").text = datetime.now(tz=timezone.UTC).strftime(
+        ET.SubElement(meta, "Timestamp").text = datetime.now(tz=timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
         ET.SubElement(meta, "Computer").text = socket.gethostname()
@@ -643,7 +643,7 @@ class DeviceDataCollector:
                         chunk_elem.text = base64.b64encode(chunks[chunk_id]).decode("utf-8")
                         packet_id += 1
 
-        timestamp = datetime.now(tz=timezone.UTC).strftime("%Y_%m_%d_%H_%M_%S")
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y_%m_%d_%H_%M_%S")
         path_file = Path.cwd() / f"raw_data_{timestamp}.xml"
         path_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -651,7 +651,7 @@ class DeviceDataCollector:
             ET.indent(root, space="  ", level=0)
         tree = ET.ElementTree(root)
         tree.write(path_file, encoding="utf-8", xml_declaration=True)
-        print(f"Raw XML saved to: {path_file}")
+        log.debug(f"Raw XML saved to: {path_file}")
 
     def visualize_matrices(self):
         """Visualize all matrices as heatmaps and save to PNG"""
@@ -661,15 +661,15 @@ class DeviceDataCollector:
             import seaborn as sns
             from matplotlib import ticker
         except ImportError:
-            print(
+            log.warning(
                 "Visualization requires seaborn and matplotlib. Please install them: pip install seaborn matplotlib"
             )
             return
 
-        timestamp = datetime.now(tz=timezone.UTC).strftime("%Y_%m_%d_%H_%M_%S")
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y_%m_%d_%H_%M_%S")
         path_vis = Path().cwd() / f"visualization/viz_{timestamp}"
         path_vis.mkdir(parents=True, exist_ok=True)
-        print(f"Generating visualizations in: {path_vis}")
+        log.info(f"Generating visualizations in: {path_vis}")
 
         # Apply phase masking before visualization
         for device_family in sorted(self.devices.keys()):
@@ -772,7 +772,7 @@ class DeviceDataCollector:
                 path_file = path_vis / f"strength_chart_{device_family}.pdf"
                 plt.savefig(path_file, format="pdf", bbox_inches="tight")
                 plt.close()
-                print(f"  Saved: {path_file}")
+                log.info(f"  Saved: {path_file}")
 
             # Event Matrix
             df_events = self.create_event_matrix(device_family)
@@ -809,7 +809,7 @@ class DeviceDataCollector:
         # Create connection vector plots
         create_vector_plots(self, path_vis)
 
-        print("Visualization complete")
+        log.debug("Visualization complete")
 
     def create_event_matrix(self, device_family):
         """Create a matrix of Pins vs Events"""
@@ -849,10 +849,10 @@ class DeviceDataCollector:
             tree = eTree.parse(filename)
             root = tree.getroot()
         except Exception as e:
-            print(f"Failed to parse XML file: {e}")
+            log.exception("Failed to parse XML file", exc_info=e)
             return False
 
-        print(f"Loading data from {filename}...")
+        log.info(f"Loading data from {filename}...")
 
         # Reset current state
         self.devices = {}
@@ -860,13 +860,13 @@ class DeviceDataCollector:
 
         devices_elem = root.find("Devices")
         if devices_elem is None:
-            print("No Devices found in XML")
+            log.error("No Devices found in XML")
             return False
 
         for device_elem in devices_elem.findall("Device"):
             family = device_elem.get("Family")
             uuid = device_elem.get("UUID")
-            print(f"Found Device Family: {family}, UUID: {uuid}")
+            log.info(f"Found Device Family: {family}, UUID: {uuid}")
 
             # Process Header first
             header_elem = device_elem.find("RawData[@Type='Header']")
@@ -877,7 +877,7 @@ class DeviceDataCollector:
                     header_result = {"hash_valid": True, "data": data, "raw_bytes": raw_bytes}
                     self.process_header(header_result)
                 except Exception as e:
-                    print(f"    Failed to decode header: {e}")
+                    log.exception("Failed to decode header", exc_info=e)
                     continue
 
             # Process Chunks
@@ -893,7 +893,7 @@ class DeviceDataCollector:
                     }
                     self.process_chunk(chunk_result)
                 except Exception as e:
-                    print(f"    Failed to decode chunk: {e}")
+                    log.exception("Failed to decode chunk", exc_info=e)
 
-        print("Data loaded successfully")
+        log.debug("Data loaded successfully")
         return True

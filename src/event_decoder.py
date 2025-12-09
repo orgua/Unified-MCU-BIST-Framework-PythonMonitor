@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from collections.abc import Sequence
 
+from bistmon.logger import log
 from typing_extensions import deprecated
 
 # Pin Event Type definitions (indexes must match device enum)
@@ -64,7 +65,7 @@ def encode_event_list(events: Sequence):
 @deprecated("not used ATM")
 def decode_result(result: dict | None) -> list[str]:
     if not result or not result.get("hash_valid"):
-        print("Invalid or corrupted result")
+        log.error("Invalid or corrupted result")
         return []
 
     data = result.get("data", {})

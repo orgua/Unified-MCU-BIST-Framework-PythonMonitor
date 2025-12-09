@@ -7,11 +7,11 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-from .config_framework import PHASE_VECTORS
-from .config_framework import ConnectionType
-from .config_framework import FrameworkKey
-from .config_targets import get_pin_name
+from bistmon.config_framework import PHASE_VECTORS
+from bistmon.config_framework import ConnectionType
+from bistmon.config_framework import FrameworkKey
+from bistmon.config_targets import get_pin_name
+from bistmon.logger import log
 
 # Phase masking is now handled in data_storage.py before vector analysis
 
@@ -402,7 +402,7 @@ def create_vector_plots(collector, base_dir: Path):
             edgecolor="none",
         )
         plt.close()
-        print(f"  Saved: {filename}")
+        log.debug(f"  Saved: {filename}")
 
     sns.reset_defaults()
 
@@ -412,15 +412,15 @@ def print_vectors(collector):
     results = analyze_connections(collector)
 
     for device_family, summary_data in results.items():
-        print(f"\n=== Connection Vectors - Device {device_family} ===")
+        log.debug(f"\n=== Connection Vectors - Device {device_family} ===")
 
         if not summary_data:
-            print("No internal connections found.")
+            log.warning("No internal connections found.")
             continue
 
         for data in summary_data:
             for vector_info in data["grouped_vectors"]:
                 dx, dy = vector_info["value"]
-                print(f"  {vector_info['label']}: ({dx}, {dy})")
+                log.info(f"  {vector_info['label']}: ({dx}, {dy})")
 
-            print()  # Empty line for better readability
+            log.info("")  # Empty line for better readability

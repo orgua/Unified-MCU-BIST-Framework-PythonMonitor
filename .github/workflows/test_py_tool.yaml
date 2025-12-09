@@ -4,7 +4,7 @@ on:
   workflow_call:
 
 jobs:
-  test_client:
+  test_tool:
 
     strategy:
       matrix:
@@ -16,7 +16,7 @@ jobs:
       UV_PYTHON: ${{ matrix.python-version }}
 
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.os }}-${{ matrix.python-version }}-client
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.os }}-${{ matrix.python-version }}-tool
       cancel-in-progress: true
 
     steps:

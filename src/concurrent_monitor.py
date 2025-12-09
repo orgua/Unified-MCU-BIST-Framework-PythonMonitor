@@ -7,10 +7,9 @@ from pathlib import Path
 
 import cbor2
 import crcmod
+from bistmon.data_storage import DeviceDataCollector
+from bistmon.logger import log
 from serial import Serial
-
-from .data_storage import DeviceDataCollector
-from .logger import log
 
 # Protocol identifiers (4 bytes each, little endian)
 HEADER_START: bytes = bytes([0x0C, 0x0B, 0x0A, 0x09])
@@ -37,9 +36,9 @@ def send_ack(serial: Serial, received_hash):
         ack_data.extend(ACK_END.to_bytes(4, "little"))
 
         serial.write(ack_data)
-        print(f"ACK sent for crc: 0x{received_hash:08X}")
+        log.debug(f"ACK sent for crc: 0x{received_hash:08X}")
     except Exception as e:
-        print(f"ACK send failed: {e}")
+        log.exception("ACK send failed", exc_info=e)
 
 
 def parse_packet(hex_data, *, has_packet_id=False):
@@ -85,12 +84,12 @@ def parse_packet(hex_data, *, has_packet_id=False):
             "raw_bytes": cbor_bytes,
         }
     except Exception as e:
-        print(f"Parse packet error: {e}")
-        return None
+        log.exception("Parse packet error", exc_info=e)
+    return None
 
 
 def serial_reader(serial: Serial, data_queue, stop_event):
-    print("Serial reader thread started")
+    log.debug("Serial reader thread started")
 
     while not stop_event.is_set():
         try:
@@ -102,15 +101,15 @@ def serial_reader(serial: Serial, data_queue, stop_event):
                 time.sleep(0.001)  # Very small delay when no data
 
         except Exception as e:
-            print(f"Reader error: {e}")
+            log.exception("Reader error", exc_info=e)
             break
 
-    print("Serial reader stopped")
+    log.debug("Serial reader stopped")
 
 
 def packet_processor(serial: Serial, data_queue, stop_event, collector):
     """Process 2: Process incoming data and handle protocol"""
-    print("Packet processor thread started")
+    log.debug("Packet processor thread started")
 
     buffer = bytearray()
     packet_data = bytearray()
@@ -134,7 +133,7 @@ def packet_processor(serial: Serial, data_queue, stop_event, collector):
                             line_text = debug_buffer.decode("utf-8", errors="ignore").strip()
                             # Only print if it starts with DEBUG:
                             if line_text.startswith("DEBUG:"):
-                                print(f"{line_text}")
+                                log.debug(line_text)
                         except:
                             pass
                         debug_buffer.clear()  # Clear for next line
@@ -153,23 +152,23 @@ def packet_processor(serial: Serial, data_queue, stop_event, collector):
             # Look for protocol markers (binary protocol handling)
             while len(buffer) >= 4:
                 if buffer[:4] == HEADER_START:
-                    print("=== Header Start ===")
+                    log.debug("=== Header Start ===")
                     receiving_header = True
                     packet_data = bytearray()
                     buffer = buffer[4:]
 
                 elif buffer[:4] == HEADER_END:
-                    print("=== Header End ===")
+                    log.debug("=== Header End ===")
                     receiving_header = False
                     if packet_data:
                         result = parse_packet(packet_data.hex(), has_packet_id=False)
 
                         # Debug: Print CBOR structure with keys
                         data = result.get("data", {})
-                        print(
+                        log.debug(
                             f"CBOR Header: Device Family {data.get(1)}, Total Chunks {data.get(2)}"
                         )
-                        print(f"📦 CBOR Header Data: {data}")
+                        log.debug(f"📦 CBOR Header Data: {data}")
 
                         # Process header in collector
                         collector.process_header(result)
@@ -179,9 +178,9 @@ def packet_processor(serial: Serial, data_queue, stop_event, collector):
                             if result["hash_valid"]:
                                 send_ack(serial, result["received_hash"])
                             else:
-                                print("Hash invalid, no ACK sent")
+                                log.warning("Hash invalid, no ACK sent")
                         else:
-                            print("ACK not requested, no ACK sent")
+                            log.debug("ACK not requested, no ACK sent")
                     packet_data = bytearray()
                     buffer = buffer[4:]
 
@@ -197,10 +196,10 @@ def packet_processor(serial: Serial, data_queue, stop_event, collector):
                         if result:
                             # Debug: Print CBOR structure with keys
                             data = result.get("data", {})
-                            print(
+                            log.debug(
                                 f"Received Chunk {data.get(0)} (Packet ID: {result['packet_id']})"
                             )
-                            print(f"CBOR Data: {data}")
+                            log.debug(f"CBOR Data: {data}")
 
                             # Process chunk in collector
                             collector.process_chunk(result)
@@ -213,9 +212,9 @@ def packet_processor(serial: Serial, data_queue, stop_event, collector):
                                 if result["hash_valid"]:
                                     send_ack(serial, result["received_hash"])
                                 else:
-                                    print("Hash invalid, no ACK sent")
+                                    log.warning("Hash invalid, no ACK sent")
                             else:
-                                print("ACK not requested, no ACK sent")
+                                log.debug("ACK not requested, no ACK sent")
                     packet_data = bytearray()
                     buffer = buffer[4:]
 
@@ -228,17 +227,18 @@ def packet_processor(serial: Serial, data_queue, stop_event, collector):
                     buffer = buffer[1:]
 
         except Exception as e:
-            print(f"Processor error: {e}")
+            log.exception("Processor error", exc_info=e)
 
-    print("Packet processor stopped")
+    log.debug("Packet processor stopped")
 
 
 def offline_mode(file: Path):
     """Run in offline mode loading data from XML"""
     collector = DeviceDataCollector()
     if collector.load_from_xml(file):
-        print("Data loaded. Entering offline command mode.")
-        print("Press 'v' to visualize, 's' to save report, 'q' to quit")
+        log.info("Data loaded. Entering offline command mode.")
+        log.info("Press 'v' to visualize, 's' to save report, 'q' to quit")
+        # TODO: replace by pre mode selection
 
         while True:
             try:
@@ -254,7 +254,7 @@ def offline_mode(file: Path):
             except EOFError:
                 break
     else:
-        print("Failed to load data.")
+        log.error("Failed to load data.")
 
 
 def monitor_serial(serial_port: str, baudrate: int = 9600):
@@ -267,8 +267,8 @@ def monitor_serial(serial_port: str, baudrate: int = 9600):
         data_queue = queue.Queue(maxsize=1000)
         stop_event = threading.Event()
 
-        print("Starting concurrent monitoring...")
-        print("Press 's' to save, 'r' to save raw XML, 'v' to visualize")
+        log.info("Starting concurrent monitoring...")
+        log.info("Press 's' to save, 'r' to save raw XML, 'v' to visualize")
 
         reader_thread = threading.Thread(
             target=serial_reader, args=(serial, data_queue, stop_event), name="SerialReader"
@@ -300,11 +300,11 @@ def monitor_serial(serial_port: str, baudrate: int = 9600):
                         break
 
                 if not reader_thread.is_alive() or not processor_thread.is_alive():
-                    print("Thread died")
+                    log.warning("Thread died")
                     break
 
         except KeyboardInterrupt:
-            print("\nStopping...")
+            log.info("\nStopping...")
 
         finally:
             # Stop threads gracefully
@@ -316,4 +316,4 @@ def monitor_serial(serial_port: str, baudrate: int = 9600):
             )  # TODO: this does not kill the process, could survive as zombie
             processor_thread.join(timeout=2)
 
-            print("Monitor stopped")
+            log.debug("Monitor stopped")
