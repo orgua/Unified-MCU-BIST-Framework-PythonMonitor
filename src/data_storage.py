@@ -1,8 +1,8 @@
 import base64
 import hashlib
 import sys
-from datetime import UTC
 from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 
 import cbor2
@@ -275,7 +275,7 @@ class DeviceDataCollector:
             else:
                 device_uuid = "UNKNOWN"
 
-        timestamp = datetime.now(tz=UTC).strftime("%Y_%m_%d_%H_%M_%S")
+        timestamp = datetime.now(tz=timezone.UTC).strftime("%Y_%m_%d_%H_%M_%S")
         file = Path().cwd() / f"logs/output_{device_family}_{device_uuid}_{timestamp}.txt"
         file.parent.mkdir(parents=True, exist_ok=True)
         self.output_file = file.open("w", encoding="utf-8")
@@ -600,7 +600,9 @@ class DeviceDataCollector:
 
         root = ET.Element("ShepherdTest")
         meta = ET.SubElement(root, "Metadata")
-        ET.SubElement(meta, "Timestamp").text = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
+        ET.SubElement(meta, "Timestamp").text = datetime.now(tz=timezone.UTC).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         ET.SubElement(meta, "Computer").text = socket.gethostname()
         try:
             ET.SubElement(meta, "User").text = os.getlogin()
@@ -641,7 +643,7 @@ class DeviceDataCollector:
                         chunk_elem.text = base64.b64encode(chunks[chunk_id]).decode("utf-8")
                         packet_id += 1
 
-        timestamp = datetime.now(tz=UTC).strftime("%Y_%m_%d_%H_%M_%S")
+        timestamp = datetime.now(tz=timezone.UTC).strftime("%Y_%m_%d_%H_%M_%S")
         path_file = Path.cwd() / f"raw_data_{timestamp}.xml"
         path_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -664,7 +666,7 @@ class DeviceDataCollector:
             )
             return
 
-        timestamp = datetime.now(tz=UTC).strftime("%Y_%m_%d_%H_%M_%S")
+        timestamp = datetime.now(tz=timezone.UTC).strftime("%Y_%m_%d_%H_%M_%S")
         path_vis = Path().cwd() / f"visualization/viz_{timestamp}"
         path_vis.mkdir(parents=True, exist_ok=True)
         print(f"Generating visualizations in: {path_vis}")
