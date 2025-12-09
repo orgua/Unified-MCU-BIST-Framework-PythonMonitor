@@ -1,7 +1,10 @@
 """Analyze single pin measurements to determine external drive strength."""
 
+# TODO: rename file to step_analyze_pin
 from collections.abc import Mapping
 from collections.abc import Sequence
+
+from typing_extensions import deprecated
 
 STRENGTH_2_PATTERN: Mapping[int, tuple] = {
     6: (1, 1, 1, 1, 1, 1),
@@ -21,7 +24,7 @@ STRENGTH_2_PATTERN: Mapping[int, tuple] = {
 PATTERN_2_STRENGTH = {v: k for k, v in STRENGTH_2_PATTERN.items()}
 
 # Order: Stage 1 N/P, Stage 2 N/P, Stage 3 N/P
-CHECKS: set[str] = {"STEP_1_A", "STEP_1_B", "STEP_2_A", "STEP_2_B", "STEP_3_A", "STEP_3_B"}
+CHECKS: list[str] = ["STEP_1_A", "STEP_1_B", "STEP_2_A", "STEP_2_B", "STEP_3_A", "STEP_3_B"]
 
 
 def get_value_of_stage(stage: str, events: Sequence) -> int | str:
@@ -34,11 +37,12 @@ def get_value_of_stage(stage: str, events: Sequence) -> int | str:
 
 
 def analyze_pin(pin_events: Sequence) -> int | None:
-    """Analyze events of a single pin."""
+    """Analyze events of a single pin to derive external drive strength."""
     pattern = tuple(get_value_of_stage(stage, pin_events) for stage in CHECKS)
     return PATTERN_2_STRENGTH.get(pattern)
 
 
+@deprecated("not used ATM")
 def analyze_pins(device_pins: Mapping) -> list[int | None]:
-    """Analyze events of multiple pins."""
+    """Analyze events of multiple pins to derive external drive strength."""
     return [analyze_pin(p.get("events", [])) for p in device_pins]

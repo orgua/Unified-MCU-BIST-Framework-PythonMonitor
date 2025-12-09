@@ -2,163 +2,23 @@ import base64
 import hashlib
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import cbor2
 import pandas as pd
 
-from event_decoder import PIN_EVENT_TYPES
-from event_decoder import decode_event_type_one_hot
-from phase_masking import PhaseMasking
-from pin_analyzer import analyze_pin
-
-KEY_CHUNK_ID = 0
-KEY_PINS = 2
-KEY_PIN = 4
-KEY_EVENTS = 5
-KEY_CONNECTIONS = 6
-KEY_OTHER_PIN = 7
-KEY_CONNECTION_PARAMETER = 8  # Device ID (external) or Phase (internal)
-KEY_CONNECTION_TYPE = 9
-KEY_STREAM_NUMBER = 10
-
-# Header Keys
-HEADER_KEY_DEVICE_UUID = 0
-HEADER_KEY_DEVICE_FAMILY = 1
-HEADER_KEY_TOTAL_CHUNKS = 2
-HEADER_KEY_TOTAL_PINS = 3
-HEADER_KEY_ACTIVE_PINS = 4
-HEADER_KEY_HEADER_HASH = 5
-HEADER_KEY_NUMBER_SEEN_DEVICES = 6
-HEADER_KEY_SEEN_DEVICE_IDS = 7
-HEADER_KEY_ACK_REQUESTED = 8
-HEADER_KEY_VERSION = 9
-HEADER_KEY_EXPECTED_SESSIONS = 10
-
-# Connection Types
-CONNECTION_TYPE_INTERNAL = 0
-CONNECTION_TYPE_EXTERNAL = 1
-
-# Internal Connection Phases
-PHASE_0_PULLDOWN = 0
-PHASE_1_PULLUP = 1
-PHASE_2_DRIVE_LOW = 2
-PHASE_3_DRIVE_HIGH = 3
-PHASE_4_ALLPULLUP_LOW = 4
-PHASE_5_ALLPULLDOWN_HIGH = 5
-
-PHASE_NAMES = {
-    0: "ONE_SET_PULLDOWN",
-    1: "ONE_SET_PULLUP",
-    2: "DRIVE_LOW",
-    3: "DRIVE_HIGH",
-    4: "ALLPULLUP_LOW",
-    5: "ALLPULLDOWN_HIGH",
-}
-
-# Pin Name Mappings for NRF52840
-NRF52840_PIN_NAMES = {
-    21: "GPIO0_UART_RX",
-    8: "GPIO1_UART_TX",
-    4: "GPIO2",
-    5: "GPIO3",
-    41: "GPIO4",  # P1.09
-    26: "GPIO5",
-    35: "GPIO6",  # P1.03
-    11: "GPIO7",
-    13: "GPIO8",
-    16: "GPIO9",
-    12: "GPIO10",
-    10: "GPIO11",
-    19: "GPIO12",
-    20: "GPIO13",
-    24: "GPIO14",
-    27: "GPIO15",
-    23: "PWRGDL",
-    7: "PWRGDH",
-    45: "PIN_LED0",  # P1.13
-    3: "PIN_LED2",
-    40: "I2C_SCL",  # P1.08
-    6: "I2C_SDA",
-    30: "RTC_INT",
-    25: "MAX_INT",
-    18: "C2C_CLK",
-    17: "C2C_CoPi",
-    14: "C2C_CiPo",
-    22: "C2C_PSel",
-    15: "C2C_GPIO",
-    9: "THRCTRL_H0",
-    34: "THRCTRL_H1",  # P1.02
-    39: "THRCTRL_L0",  # P1.07
-    36: "THRCTRL_L1",  # P1.04
-}
-
-# Pin Name Mappings for MSP430FR5994
-MSP430_PIN_NAMES = {
-    22: "GPIO0_UART_RX",  # P2.6
-    21: "GPIO1_UART_TX",  # P2.5
-    19: "GPIO2",  # P2.3
-    20: "GPIO3",  # P2.4
-    38: "GPIO4",  # P4.6
-    30: "GPIO5",  # P3.6
-    6: "GPIO6",  # PJ.6
-    43: "GPIO7",  # P5.3
-    42: "GPIO8",  # P5.2
-    41: "GPIO9",  # P5.1
-    40: "GPIO10",  # P5.0
-    48: "GPIO11",  # P6.0
-    49: "GPIO12",  # P6.1
-    51: "GPIO13",  # P6.3
-    54: "GPIO14",  # P6.6
-    55: "GPIO15",  # P6.7
-    44: "PWRGDL",  # P5.4
-    45: "PWRGDH",  # P5.5
-    47: "PIN_LED0",  # P5.7
-    0: "PIN_LED2",  # PJ.0
-    53: "I2C_SCL",  # P6.5
-    52: "I2C_SDA",  # P6.4
-    1: "MAX_INT",  # PJ.1
-    13: "C2C_CLK",  # P1.5
-    16: "C2C_CoPi",  # P2.0
-    17: "C2C_CiPo",  # P2.1
-    12: "C2C_PSel",  # P1.4
-    2: "C2C_GPIO",  # PJ.2
-    11: "THRCTRL_H0",  # P1.3
-    27: "THRCTRL_H1",  # P3.3
-    50: "THRCTRL_L0",  # P6.2
-    56: "THRCTRL_L1",  # P7.0
-    59: "RTC_INT",  # P7.3
-}
-
-
-def get_pin_name(device_family, pin_num):
-    """Get the pin name for a given device family and pin number"""
-    if "NRF" in str(device_family).upper():
-        name = NRF52840_PIN_NAMES.get(pin_num)
-        return f"{pin_num}: {name}" if name else str(pin_num)
-    if "MSP" in str(device_family).upper():
-        name = MSP430_PIN_NAMES.get(pin_num)
-        return f"{pin_num}: {name}" if name else str(pin_num)
-    return str(pin_num)
-
-
-def get_known_pins(device_family):
-    """Get list of known pin numbers for a device family"""
-    if "NRF" in str(device_family).upper():
-        return list(NRF52840_PIN_NAMES.keys())
-    if "MSP" in str(device_family).upper():
-        return list(MSP430_PIN_NAMES.keys())
-    return []
-
-
-def get_all_pins_sorted(device_family, device_data):
-    """Get all pins from device data sorted by pin number"""
-    all_pins = set()
-    # Add all pins from device data
-    for pin in device_data.get("pins", []):
-        all_pins.add(pin["pin"])
-    # Also add all known pins from mapping
-    all_pins.update(get_known_pins(device_family))
-    return sorted(all_pins)
+from .config_framework import CONNECTION_TYPE
+from .config_framework import FW_KEY
+from .config_framework import HEADER_KEY
+from .config_framework import PHASE_NAMES
+from .config_targets import get_all_pins_sorted
+from .config_targets import get_pin_name
+from .connection_analyzer import create_vector_plots
+from .connection_analyzer import print_vectors
+from .event_decoder import PIN_EVENT_TYPES
+from .event_decoder import decode_event_type_one_hot
+from .phase_masking import keep_phase
+from .pin_analyzer import analyze_pin
 
 
 class TeeOutput:
@@ -203,7 +63,7 @@ class DeviceDataCollector:
     def _save_heatmap(
         self,
         df,
-        filename,
+        path_file: Path,
         cmap,
         xlabel,
         ylabel,
@@ -226,9 +86,9 @@ class DeviceDataCollector:
             plt.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(0, -0.2))
 
         plt.tight_layout()
-        plt.savefig(filename, format="pdf", bbox_inches="tight")
+        plt.savefig(path_file, format="pdf", bbox_inches="tight")
         plt.close()
-        print(f"  Saved: {filename}")
+        print(f"  Saved: {path_file}")
 
     # ===== Data Processing Methods =====
 
@@ -237,26 +97,26 @@ class DeviceDataCollector:
             return False
 
         header_data = header_result.get("data", {})
-        device_family = header_data.get(HEADER_KEY_DEVICE_FAMILY)
+        device_family = header_data.get(HEADER_KEY.DEVICE_FAMILY)
         if device_family is None:
             return False
 
         # Print received hash (Device Version)
-        git_commit_hash = header_data.get(HEADER_KEY_VERSION, None)
+        git_commit_hash = header_data.get(HEADER_KEY.VERSION, None)
 
         self.current_device_family = device_family
 
         # Clear existing data for this device_family when new header received
         self.devices[device_family] = {
-            "total_chunks": header_data.get(HEADER_KEY_TOTAL_CHUNKS, 0),
-            "expected_sessions": header_data.get(HEADER_KEY_EXPECTED_SESSIONS, 1),
+            "total_chunks": header_data.get(HEADER_KEY.TOTAL_CHUNKS, 0),
+            "expected_sessions": header_data.get(HEADER_KEY.EXPECTED_SESSIONS, 1),
             "pins": [],
             "received_sessions": {},
             "raw_header": header_result.get("raw_bytes", b""),
             "raw_session_chunks": {},
             "complete": False,
             "saved": False,
-            "uuid": header_data.get(HEADER_KEY_DEVICE_UUID, "UNKNOWN"),
+            "uuid": header_data.get(HEADER_KEY.DEVICE_UUID, "UNKNOWN"),
             "git_commit": git_commit_hash,
         }
         return True
@@ -270,8 +130,8 @@ class DeviceDataCollector:
         if not device:
             return False
 
-        chunk_id = chunk_data.get(KEY_CHUNK_ID, chunk_result.get("packet_id", -1))
-        session_id = chunk_data.get(KEY_STREAM_NUMBER, 0)
+        chunk_id = chunk_data.get(FW_KEY.CHUNK_ID, chunk_result.get("packet_id", -1))
+        session_id = chunk_data.get(FW_KEY.STREAM_NUMBER, 0)
 
         if session_id not in device["received_sessions"]:
             device["received_sessions"][session_id] = set()
@@ -283,22 +143,22 @@ class DeviceDataCollector:
         # Store raw chunk bytes
         device["raw_session_chunks"][session_id][chunk_id] = chunk_result.get("raw_bytes", b"")
 
-        for pin_entry in chunk_data.get(KEY_PINS, []):
-            events_raw = pin_entry.get(KEY_EVENTS, 0)
+        for pin_entry in chunk_data.get(FW_KEY.PINS, []):
+            events_raw = pin_entry.get(FW_KEY.EVENTS, 0)
             events = decode_event_type_one_hot(events_raw) if events_raw else []
 
             if "EXCEEDS_CONNECTION_LIMIT" in events:
-                pin_name = get_pin_name(self.current_device_family, pin_entry.get(KEY_PIN))
+                pin_name = get_pin_name(self.current_device_family, pin_entry.get(FW_KEY.PIN))
                 print(f"WARNING: Pin {pin_name} exceeded connection limit!")
 
-            pin_num = pin_entry.get(KEY_PIN)
+            pin_num = pin_entry.get(FW_KEY.PIN)
             new_connections = [
                 {
-                    KEY_OTHER_PIN: c.get(KEY_OTHER_PIN),
-                    KEY_CONNECTION_PARAMETER: c.get(KEY_CONNECTION_PARAMETER),
-                    KEY_CONNECTION_TYPE: c.get(KEY_CONNECTION_TYPE, 0),
+                    FW_KEY.OTHER_PIN: c.get(FW_KEY.OTHER_PIN),
+                    FW_KEY.CONNECTION_PARAMETER: c.get(FW_KEY.CONNECTION_PARAMETER),
+                    FW_KEY.CONNECTION_TYPE: c.get(FW_KEY.CONNECTION_TYPE, 0),
                 }
-                for c in pin_entry.get(KEY_CONNECTIONS, [])
+                for c in pin_entry.get(FW_KEY.CONNECTIONS, [])
             ]
 
             strength = analyze_pin(events)
@@ -353,10 +213,10 @@ class DeviceDataCollector:
         # Filter connections for each pin
         for pin in device["pins"]:
             for conn in pin["connections"]:
-                conn_type = conn.get(KEY_CONNECTION_TYPE, 0)
-                if conn_type == CONNECTION_TYPE_INTERNAL:
-                    phase = conn.get(KEY_CONNECTION_PARAMETER, -1)
-                    other_pin = conn.get(KEY_OTHER_PIN)
+                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
+                if conn_type == CONNECTION_TYPE.INTERNAL:
+                    phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
+                    other_pin = conn.get(FW_KEY.OTHER_PIN)
 
                     # Check if source or target pin should be masked
                     source_masked = self._should_mask_connection(pin["events"], phase)
@@ -383,10 +243,10 @@ class DeviceDataCollector:
         # First pass: group connections by directional pin pairs
         for pin in device["pins"]:
             for conn in pin["connections"]:
-                if conn.get(KEY_CONNECTION_TYPE, 0) == CONNECTION_TYPE_INTERNAL:
-                    phase = conn.get(KEY_CONNECTION_PARAMETER, -1)
+                if conn.get(FW_KEY.CONNECTION_TYPE, 0) == CONNECTION_TYPE.INTERNAL:
+                    phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
                     if 0 <= phase <= 5:
-                        pin_pair = (pin["pin"], conn.get(KEY_OTHER_PIN))
+                        pin_pair = (pin["pin"], conn.get(FW_KEY.OTHER_PIN))
                         if pin_pair not in connection_pairs:
                             connection_pairs[pin_pair] = {"phases": set(), "connections": []}
                         connection_pairs[pin_pair]["phases"].add(phase)
@@ -395,10 +255,8 @@ class DeviceDataCollector:
         # Second pass: apply masking
         for pair_data in connection_pairs.values():
             for conn in pair_data["connections"]:
-                phase = conn.get(KEY_CONNECTION_PARAMETER, -1)
-                conn["phase_masked"] = not PhaseMasking.should_keep_phase(
-                    phase, pair_data["phases"]
-                )
+                phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
+                conn["phase_masked"] = not keep_phase(phase, pair_data["phases"])
 
     def get_all_devices(self):
         return self.devices
@@ -416,15 +274,11 @@ class DeviceDataCollector:
             else:
                 device_uuid = "UNKNOWN"
 
-        import os
-
-        os.makedirs("logs", exist_ok=True)
-
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        filename = f"logs/output_{device_family}_{device_uuid}_{timestamp}.txt"
-
-        self.output_file = open(filename, "w", encoding="utf-8")
-        print(f"Saving to: {filename}")
+        file = Path().cwd() / f"logs/output_{device_family}_{device_uuid}_{timestamp}.txt"
+        file.parent.mkdir(parents=True, exist_ok=True)
+        self.output_file = file.open("w", encoding="utf-8")
+        print(f"Saving to: {file}")
 
         self.original_stdout = sys.stdout
         sys.stdout = TeeOutput(self.output_file)
@@ -489,11 +343,11 @@ class DeviceDataCollector:
             for conn in pin["connections"]:
                 if conn.get("masked", False):
                     continue
-                conn_type = conn.get(KEY_CONNECTION_TYPE, 0)
-                param = conn.get(KEY_CONNECTION_PARAMETER, 0)
-                other_pin_name = get_pin_name(device_family, conn.get(KEY_OTHER_PIN))
+                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
+                param = conn.get(FW_KEY.CONNECTION_PARAMETER, 0)
+                other_pin_name = get_pin_name(device_family, conn.get(FW_KEY.OTHER_PIN))
 
-                if conn_type == CONNECTION_TYPE_INTERNAL:
+                if conn_type == CONNECTION_TYPE.INTERNAL:
                     phase_name = PHASE_NAMES.get(param, f"PHASE_{param}")
                     print(f"  {pin_name} -> {other_pin_name} [{phase_name}]")
                 else:  # EXTERNAL
@@ -537,8 +391,6 @@ class DeviceDataCollector:
         self.run_pin_analysis()
 
         # Add simple vector analysis to text output
-        from connection_analyzer import print_vectors
-
         print_vectors(self)
 
         self._stop_output_capture()
@@ -552,10 +404,10 @@ class DeviceDataCollector:
                 for conn in pin["connections"]:
                     if conn.get("masked", False):
                         continue
-                    conn_type = conn.get(KEY_CONNECTION_TYPE, 0)
-                    param = conn.get(KEY_CONNECTION_PARAMETER, 0)
-                    other_pin_name = get_pin_name(device_family, conn.get(KEY_OTHER_PIN))
-                    if conn_type == CONNECTION_TYPE_INTERNAL:
+                    conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
+                    param = conn.get(FW_KEY.CONNECTION_PARAMETER, 0)
+                    other_pin_name = get_pin_name(device_family, conn.get(FW_KEY.OTHER_PIN))
+                    if conn_type == CONNECTION_TYPE.INTERNAL:
                         phase_name = PHASE_NAMES.get(param, f"PHASE_{param}")
                         print(f"  {pin_name} -> {other_pin_name} [{phase_name}]")
                     else:  # EXTERNAL
@@ -659,11 +511,11 @@ class DeviceDataCollector:
         for pin in device_a["pins"]:
             pin_name_a = get_pin_name(controller_a, pin["pin"])
             for conn in pin["connections"]:
-                conn_type = conn.get(KEY_CONNECTION_TYPE, 0)
-                if conn_type == CONNECTION_TYPE_EXTERNAL:
-                    device_id = conn.get(KEY_CONNECTION_PARAMETER, -1)
+                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
+                if conn_type == CONNECTION_TYPE.EXTERNAL:
+                    device_id = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
                     if device_id == controller_b:
-                        pin_name_b = get_pin_name(controller_b, conn.get(KEY_OTHER_PIN))
+                        pin_name_b = get_pin_name(controller_b, conn.get(FW_KEY.OTHER_PIN))
                         if pin_name_b in col_labels:
                             df.at[pin_name_a, pin_name_b] = 1
         return df
@@ -707,10 +559,10 @@ class DeviceDataCollector:
                 df.at[pin_name_a, pin_name_a] = 1
 
             for conn in pin["connections"]:
-                conn_type = conn.get(KEY_CONNECTION_TYPE, 0)
-                if conn_type == CONNECTION_TYPE_INTERNAL:
-                    conn_phase = conn.get(KEY_CONNECTION_PARAMETER, -1)
-                    pin_name_b = get_pin_name(controller, conn.get(KEY_OTHER_PIN))
+                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
+                if conn_type == CONNECTION_TYPE.INTERNAL:
+                    conn_phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
+                    pin_name_b = get_pin_name(controller, conn.get(FW_KEY.OTHER_PIN))
 
                     if conn_phase == phase and pin_name_b in labels:
                         if pin_works:
@@ -754,7 +606,7 @@ class DeviceDataCollector:
         ET.SubElement(meta, "Timestamp").text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ET.SubElement(meta, "Computer").text = socket.gethostname()
         try:
-            ET.SubElement(meta, "User").text = os.getlogin()
+            ET.SubElement(meta, "User").text = os.getlogin()  # TODO: why so much data-collection?
         except:
             ET.SubElement(meta, "User").text = "unknown"
         devices_elem = ET.SubElement(root, "Devices")
@@ -812,12 +664,10 @@ class DeviceDataCollector:
             )
             return
 
-        import os
-
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        base_dir = f"visualization/viz_{timestamp}"
-        os.makedirs(base_dir, exist_ok=True)
-        print(f"Generating visualizations in: {base_dir}")
+        path_vis = Path().cwd() / f"visualization/viz_{timestamp}"
+        path_vis.mkdir(parents=True, exist_ok=True)
+        print(f"Generating visualizations in: {path_vis}")
 
         # Apply phase masking before visualization
         for device_family in sorted(self.devices.keys()):
@@ -829,10 +679,10 @@ class DeviceDataCollector:
                 if device_family != other_device:
                     df = self.create_connection_matrix(device_family, other_device)
                     if df is not None and not df.empty:
-                        filename = (
-                            f"{base_dir}/matrix_external_{device_family}_to_{other_device}.pdf"
+                        path_file = (
+                            path_vis / f"matrix_external_{device_family}_to_{other_device}.pdf"
                         )
-                        self._save_heatmap(df, filename, "Blues", "Pin", "Pin")
+                        self._save_heatmap(df, path_file, "Blues", "Pin", "Pin")
 
             # Phase matrices
             for phase in range(6):
@@ -852,10 +702,10 @@ class DeviceDataCollector:
                         mpatches.Patch(color="#d62728", label="3: Phase Masked"),
                     ]
 
-                    filename = f"{base_dir}/matrix_phase_{phase}_{device_family}.pdf"
+                    path_file = path_vis / f"matrix_phase_{phase}_{device_family}.pdf"
                     self._save_heatmap(
                         df,
-                        filename,
+                        path_file,
                         cmap,
                         "Measured Pin",
                         "Changed Pin",
@@ -917,10 +767,10 @@ class DeviceDataCollector:
                 plt.legend(handles=legend_handles, loc="upper right")
 
                 plt.tight_layout()
-                filename = f"{base_dir}/strength_chart_{device_family}.pdf"
-                plt.savefig(filename, format="pdf", bbox_inches="tight")
+                path_file = path_vis / f"strength_chart_{device_family}.pdf"
+                plt.savefig(path_file, format="pdf", bbox_inches="tight")
                 plt.close()
-                print(f"  Saved: {filename}")
+                print(f"  Saved: {path_file}")
 
             # Event Matrix
             df_events = self.create_event_matrix(device_family)
@@ -939,10 +789,10 @@ class DeviceDataCollector:
                     mpatches.Patch(color="#ff7f0e", label="Occurred"),
                 ]
 
-                filename = f"{base_dir}/matrix_events_{device_family}.pdf"
+                path_file = path_vis / f"matrix_events_{device_family}.pdf"
                 self._save_heatmap(
                     df_events,
-                    filename,
+                    path_file,
                     cmap_events,
                     "Event",
                     "Pin",
@@ -955,9 +805,7 @@ class DeviceDataCollector:
                 )
 
         # Create connection vector plots
-        from connection_analyzer import create_vector_plots
-
-        create_vector_plots(self, base_dir)
+        create_vector_plots(self, path_vis)
 
         print("Visualization complete")
 
@@ -970,7 +818,7 @@ class DeviceDataCollector:
         sorted_pins = get_all_pins_sorted(device_family, device_data)
 
         # Get all possible events
-        all_events = sorted(list(set(list(PIN_EVENT_TYPES.values()))))
+        all_events = sorted(set(PIN_EVENT_TYPES.values()))
 
         # Create DataFrame
         pin_labels = [get_pin_name(device_family, p) for p in sorted_pins]

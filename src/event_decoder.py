@@ -1,7 +1,12 @@
-"""Event Decoder for CBOR Serial Monitor"""
+"""Event Decoder for CBOR Serial Monitor."""
+
+from collections.abc import Mapping
+from collections.abc import Sequence
+
+from typing_extensions import deprecated
 
 # Pin Event Type definitions (indexes must match device enum)
-PIN_EVENT_TYPES = {
+PIN_EVENT_TYPES: Mapping[int, str] = {
     0: "HANDSHAKE_OK_INITIATOR",
     1: "HANDSHAKE_OK_RESPONDER",
     2: "HANDSHAKE_FAILURE",
@@ -30,8 +35,10 @@ PIN_EVENT_TYPES = {
     25: "PIN_IS_NATUTALLY_DISTURBED",
 }
 
+PIN_EVENTS_REVERSED = {v: k for k, v in PIN_EVENT_TYPES.items()}
 
-def decode_event_type_one_hot(event_bits):
+
+def decode_event_type_one_hot(event_bits: int) -> list[str]:
     """Return list of event names for bits set in event_bits."""
     events = []
     for bit_position in range(32):
@@ -41,20 +48,21 @@ def decode_event_type_one_hot(event_bits):
     return events
 
 
-def encode_event_list(events):
+@deprecated("not used ATM")
+def encode_event_list(events: Sequence):
     """Encode a list of event names back into one-hot encoded integer."""
     event_bits = 0
-    reverse_event_map = {v: k for k, v in PIN_EVENT_TYPES.items()}
 
     for event in events:
-        bit_position = reverse_event_map.get(event)
+        bit_position = PIN_EVENTS_REVERSED.get(event)
         if bit_position is not None:
             event_bits |= 1 << bit_position
 
     return event_bits
 
 
-def decode_result(result):
+@deprecated("not used ATM")
+def decode_result(result: dict | None) -> list[str]:
     if not result or not result.get("hash_valid"):
         print("Invalid or corrupted result")
         return []
@@ -68,13 +76,12 @@ def decode_result(result):
         return []
 
     # Decode one-hot encoded events
-    events = decode_event_type_one_hot(event_bits)
-
     # Return raw events without merging handshakes
-    return events
+    return decode_event_type_one_hot(event_bits)
 
 
-def format_event_list(events):
+@deprecated("not used ATM")
+def format_event_list(events: list[str]) -> str:
     """Format event list for pretty printing."""
     if not events:
         return "No events"

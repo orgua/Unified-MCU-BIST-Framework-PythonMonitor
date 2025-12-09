@@ -7,20 +7,10 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from data_storage import CONNECTION_TYPE_INTERNAL
-from data_storage import KEY_CONNECTION_PARAMETER
-from data_storage import KEY_CONNECTION_TYPE
-from data_storage import KEY_OTHER_PIN
-from data_storage import get_pin_name
-
-PHASE_VECTORS = {
-    0: {"A_to_B": (-1, 1), "B_to_A": (1, 1)},
-    1: {"A_to_B": (-1, -1), "B_to_A": (1, -1)},
-    2: {"A_to_B": (-2, 2), "B_to_A": (2, 2)},
-    3: {"A_to_B": (-2, -2), "B_to_A": (2, -2)},
-    4: {"A_to_B": (-3, 3), "B_to_A": (3, 3)},
-    5: {"A_to_B": (-3, -3), "B_to_A": (3, -3)},
-}
+from .config_framework import CONNECTION_TYPE
+from .config_framework import FW_KEY
+from .config_framework import PHASE_VECTORS
+from .config_targets import get_pin_name
 
 # Phase masking is now handled in data_storage.py before vector analysis
 
@@ -41,7 +31,7 @@ def analyze_connections(collector):
 
             # Process all connections of this pin
             for conn in pin["connections"]:
-                conn_type = conn.get(KEY_CONNECTION_TYPE, 0)
+                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
 
                 # Skip masked connections
                 if conn.get("masked", False):
@@ -52,12 +42,12 @@ def analyze_connections(collector):
                     continue
 
                 # Get phase for this connection
-                original_phase = conn.get(KEY_CONNECTION_PARAMETER, -1)
+                original_phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
 
                 # Only process internal connections
-                if conn_type == CONNECTION_TYPE_INTERNAL:
-                    target_pin = conn.get(KEY_OTHER_PIN)
-                    phase = conn.get(KEY_CONNECTION_PARAMETER, -1)
+                if conn_type == CONNECTION_TYPE.INTERNAL:
+                    target_pin = conn.get(FW_KEY.OTHER_PIN)
+                    phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
 
                     # Skip if phase is invalid
                     if phase not in PHASE_VECTORS:

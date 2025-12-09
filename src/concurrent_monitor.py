@@ -3,34 +3,32 @@ import select
 import sys
 import threading
 import time
+from pathlib import Path
 
 import cbor2
 import crcmod
-import serial
+from serial import Serial
 
-from data_storage import DeviceDataCollector
-
-# Configuration
-PORT = "/dev/tty.usbmodem11102"
-BAUDRATE = 9600
+from .data_storage import DeviceDataCollector
+from .logger import log
 
 # Protocol identifiers (4 bytes each, little endian)
-HEADER_START = bytes([0x0C, 0x0B, 0x0A, 0x09])
-HEADER_END = bytes([0x10, 0x0F, 0x0E, 0x0D])
-CHUNK_START = bytes([0x04, 0x03, 0x02, 0x01])
-CHUNK_END = bytes([0x08, 0x07, 0x06, 0x05])
+HEADER_START: bytes = bytes([0x0C, 0x0B, 0x0A, 0x09])
+HEADER_END: bytes = bytes([0x10, 0x0F, 0x0E, 0x0D])
+CHUNK_START: bytes = bytes([0x04, 0x03, 0x02, 0x01])
+CHUNK_END: bytes = bytes([0x08, 0x07, 0x06, 0x05])
 
 # CRC calculation
 calculate_crc = crcmod.predefined.mkPredefinedCrcFun("crc-32")
 
 # ACK protocol
-ACK_START = 0x191A1B1C
-ACK_END = 0x1D1E1F20
+ACK_START: int = 0x191A1B1C
+ACK_END: int = 0x1D1E1F20
 
-ACK_REQUESTED = 8
+ACK_REQUESTED: int = 8
 
 
-def send_ack(ser, received_hash):
+def send_ack(serial: Serial, received_hash):
     """Send simple ACK with crc"""
     try:
         ack_data = bytearray()
@@ -38,7 +36,7 @@ def send_ack(ser, received_hash):
         ack_data.extend(received_hash.to_bytes(4, "little"))
         ack_data.extend(ACK_END.to_bytes(4, "little"))
 
-        ser.write(ack_data)
+        serial.write(ack_data)
         print(f"ACK sent for crc: 0x{received_hash:08X}")
     except Exception as e:
         print(f"ACK send failed: {e}")
@@ -91,13 +89,13 @@ def parse_packet(hex_data, has_packet_id=False):
         return None
 
 
-def serial_reader(ser, data_queue, stop_event):
+def serial_reader(serial: Serial, data_queue, stop_event):
     print("Serial reader thread started")
 
     while not stop_event.is_set():
         try:
-            if ser.in_waiting:
-                new_data = ser.read(ser.in_waiting)
+            if serial.in_waiting:
+                new_data = serial.read(serial.in_waiting)
                 if new_data:
                     data_queue.put(new_data)
             else:
@@ -110,7 +108,7 @@ def serial_reader(ser, data_queue, stop_event):
     print("Serial reader stopped")
 
 
-def packet_processor(ser, data_queue, stop_event, collector):
+def packet_processor(serial: Serial, data_queue, stop_event, collector):
     """Process 2: Process incoming data and handle protocol"""
     print("Packet processor thread started")
 
@@ -179,7 +177,7 @@ def packet_processor(ser, data_queue, stop_event, collector):
                         if result.get("ack_requested", 1):
                             # Send ACK if hash is valid
                             if result["hash_valid"]:
-                                send_ack(ser, result["received_hash"])
+                                send_ack(serial, result["received_hash"])
                             else:
                                 print("Hash invalid, no ACK sent")
                         else:
@@ -213,7 +211,7 @@ def packet_processor(ser, data_queue, stop_event, collector):
                             if result.get("ack_requested", 1):
                                 # Send ACK if hash is valid
                                 if result["hash_valid"]:
-                                    send_ack(ser, result["received_hash"])
+                                    send_ack(serial, result["received_hash"])
                                 else:
                                     print("Hash invalid, no ACK sent")
                             else:
@@ -235,10 +233,10 @@ def packet_processor(ser, data_queue, stop_event, collector):
     print("Packet processor stopped")
 
 
-def offline_mode(filename):
+def offline_mode(file: Path):
     """Run in offline mode loading data from XML"""
     collector = DeviceDataCollector()
-    if collector.load_from_xml(filename):
+    if collector.load_from_xml(file):
         print("Data loaded. Entering offline command mode.")
         print("Press 'v' to visualize, 's' to save report, 'q' to quit")
 
@@ -259,13 +257,13 @@ def offline_mode(filename):
         print("Failed to load data.")
 
 
-def monitor_serial():
+def monitor_serial(serial_port: str, baudrate: int = 9600):
     """Concurrent serial monitor with two threads"""
-    print(f"Opening {PORT} at {BAUDRATE} baud...")
+    log.debug(f"Opening {serial_port} at {baudrate} baud...")
 
     collector = DeviceDataCollector()
 
-    with serial.Serial(PORT, BAUDRATE, timeout=1) as ser:
+    with Serial(serial_port, baudrate, timeout=1) as serial:
         data_queue = queue.Queue(maxsize=1000)
         stop_event = threading.Event()
 
@@ -273,12 +271,12 @@ def monitor_serial():
         print("Press 's' to save, 'r' to save raw XML, 'v' to visualize")
 
         reader_thread = threading.Thread(
-            target=serial_reader, args=(ser, data_queue, stop_event), name="SerialReader"
+            target=serial_reader, args=(serial, data_queue, stop_event), name="SerialReader"
         )
 
         processor_thread = threading.Thread(
             target=packet_processor,
-            args=(ser, data_queue, stop_event, collector),
+            args=(serial, data_queue, stop_event, collector),
             name="PacketProcessor",
         )
 
@@ -291,11 +289,11 @@ def monitor_serial():
         try:
             while True:
                 if sys.stdin in select.select([sys.stdin], [], [], 0.1)[0]:
-                    cmd = sys.stdin.read(1)
+                    cmd = sys.stdin.read(1)  # TODO: why?
                     if cmd == "s":
                         collector.manual_save()
                     elif cmd == "r":
-                        collector.save_raw_xml()
+                        collector.save_raw_xml()  # TODO: always save
                     elif cmd == "v":
                         collector.visualize_matrices()
                     elif cmd == "q":
@@ -313,14 +311,9 @@ def monitor_serial():
             stop_event.set()
 
             # Wait for threads to finish (with timeout)
-            reader_thread.join(timeout=2)
+            reader_thread.join(
+                timeout=2
+            )  # TODO: this does not kill the process, could survive as zombie
             processor_thread.join(timeout=2)
 
             print("Monitor stopped")
-
-
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        offline_mode(sys.argv[1])
-    else:
-        monitor_serial()
