@@ -1,16 +1,17 @@
 import base64
 import hashlib
 import sys
+from datetime import UTC
 from datetime import datetime
 from pathlib import Path
 
 import cbor2
 import pandas as pd
 
-from .config_framework import CONNECTION_TYPE
-from .config_framework import FW_KEY
-from .config_framework import HEADER_KEY
 from .config_framework import PHASE_NAMES
+from .config_framework import ConnectionType
+from .config_framework import FrameworkKey
+from .config_framework import HeaderKey
 from .config_targets import get_all_pins_sorted
 from .config_targets import get_pin_name
 from .connection_analyzer import create_vector_plots
@@ -97,26 +98,26 @@ class DeviceDataCollector:
             return False
 
         header_data = header_result.get("data", {})
-        device_family = header_data.get(HEADER_KEY.DEVICE_FAMILY)
+        device_family = header_data.get(HeaderKey.DEVICE_FAMILY)
         if device_family is None:
             return False
 
         # Print received hash (Device Version)
-        git_commit_hash = header_data.get(HEADER_KEY.VERSION, None)
+        git_commit_hash = header_data.get(HeaderKey.VERSION, None)
 
         self.current_device_family = device_family
 
         # Clear existing data for this device_family when new header received
         self.devices[device_family] = {
-            "total_chunks": header_data.get(HEADER_KEY.TOTAL_CHUNKS, 0),
-            "expected_sessions": header_data.get(HEADER_KEY.EXPECTED_SESSIONS, 1),
+            "total_chunks": header_data.get(HeaderKey.TOTAL_CHUNKS, 0),
+            "expected_sessions": header_data.get(HeaderKey.EXPECTED_SESSIONS, 1),
             "pins": [],
             "received_sessions": {},
             "raw_header": header_result.get("raw_bytes", b""),
             "raw_session_chunks": {},
             "complete": False,
             "saved": False,
-            "uuid": header_data.get(HEADER_KEY.DEVICE_UUID, "UNKNOWN"),
+            "uuid": header_data.get(HeaderKey.DEVICE_UUID, "UNKNOWN"),
             "git_commit": git_commit_hash,
         }
         return True
@@ -130,8 +131,8 @@ class DeviceDataCollector:
         if not device:
             return False
 
-        chunk_id = chunk_data.get(FW_KEY.CHUNK_ID, chunk_result.get("packet_id", -1))
-        session_id = chunk_data.get(FW_KEY.STREAM_NUMBER, 0)
+        chunk_id = chunk_data.get(FrameworkKey.CHUNK_ID, chunk_result.get("packet_id", -1))
+        session_id = chunk_data.get(FrameworkKey.STREAM_NUMBER, 0)
 
         if session_id not in device["received_sessions"]:
             device["received_sessions"][session_id] = set()
@@ -143,22 +144,22 @@ class DeviceDataCollector:
         # Store raw chunk bytes
         device["raw_session_chunks"][session_id][chunk_id] = chunk_result.get("raw_bytes", b"")
 
-        for pin_entry in chunk_data.get(FW_KEY.PINS, []):
-            events_raw = pin_entry.get(FW_KEY.EVENTS, 0)
+        for pin_entry in chunk_data.get(FrameworkKey.PINS, []):
+            events_raw = pin_entry.get(FrameworkKey.EVENTS, 0)
             events = decode_event_type_one_hot(events_raw) if events_raw else []
 
             if "EXCEEDS_CONNECTION_LIMIT" in events:
-                pin_name = get_pin_name(self.current_device_family, pin_entry.get(FW_KEY.PIN))
+                pin_name = get_pin_name(self.current_device_family, pin_entry.get(FrameworkKey.PIN))
                 print(f"WARNING: Pin {pin_name} exceeded connection limit!")
 
-            pin_num = pin_entry.get(FW_KEY.PIN)
+            pin_num = pin_entry.get(FrameworkKey.PIN)
             new_connections = [
                 {
-                    FW_KEY.OTHER_PIN: c.get(FW_KEY.OTHER_PIN),
-                    FW_KEY.CONNECTION_PARAMETER: c.get(FW_KEY.CONNECTION_PARAMETER),
-                    FW_KEY.CONNECTION_TYPE: c.get(FW_KEY.CONNECTION_TYPE, 0),
+                    FrameworkKey.OTHER_PIN: c.get(FrameworkKey.OTHER_PIN),
+                    FrameworkKey.CONNECTION_PARAMETER: c.get(FrameworkKey.CONNECTION_PARAMETER),
+                    FrameworkKey.CONNECTION_TYPE: c.get(FrameworkKey.CONNECTION_TYPE, 0),
                 }
-                for c in pin_entry.get(FW_KEY.CONNECTIONS, [])
+                for c in pin_entry.get(FrameworkKey.CONNECTIONS, [])
             ]
 
             strength = analyze_pin(events)
@@ -213,10 +214,10 @@ class DeviceDataCollector:
         # Filter connections for each pin
         for pin in device["pins"]:
             for conn in pin["connections"]:
-                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
-                if conn_type == CONNECTION_TYPE.INTERNAL:
-                    phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
-                    other_pin = conn.get(FW_KEY.OTHER_PIN)
+                conn_type = conn.get(FrameworkKey.CONNECTION_TYPE, 0)
+                if conn_type == ConnectionType.INTERNAL:
+                    phase = conn.get(FrameworkKey.CONNECTION_PARAMETER, -1)
+                    other_pin = conn.get(FrameworkKey.OTHER_PIN)
 
                     # Check if source or target pin should be masked
                     source_masked = self._should_mask_connection(pin["events"], phase)
@@ -243,10 +244,10 @@ class DeviceDataCollector:
         # First pass: group connections by directional pin pairs
         for pin in device["pins"]:
             for conn in pin["connections"]:
-                if conn.get(FW_KEY.CONNECTION_TYPE, 0) == CONNECTION_TYPE.INTERNAL:
-                    phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
+                if conn.get(FrameworkKey.CONNECTION_TYPE, 0) == ConnectionType.INTERNAL:
+                    phase = conn.get(FrameworkKey.CONNECTION_PARAMETER, -1)
                     if 0 <= phase <= 5:
-                        pin_pair = (pin["pin"], conn.get(FW_KEY.OTHER_PIN))
+                        pin_pair = (pin["pin"], conn.get(FrameworkKey.OTHER_PIN))
                         if pin_pair not in connection_pairs:
                             connection_pairs[pin_pair] = {"phases": set(), "connections": []}
                         connection_pairs[pin_pair]["phases"].add(phase)
@@ -255,7 +256,7 @@ class DeviceDataCollector:
         # Second pass: apply masking
         for pair_data in connection_pairs.values():
             for conn in pair_data["connections"]:
-                phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
+                phase = conn.get(FrameworkKey.CONNECTION_PARAMETER, -1)
                 conn["phase_masked"] = not keep_phase(phase, pair_data["phases"])
 
     def get_all_devices(self):
@@ -274,7 +275,7 @@ class DeviceDataCollector:
             else:
                 device_uuid = "UNKNOWN"
 
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        timestamp = datetime.now(tz=UTC).strftime("%Y_%m_%d_%H_%M_%S")
         file = Path().cwd() / f"logs/output_{device_family}_{device_uuid}_{timestamp}.txt"
         file.parent.mkdir(parents=True, exist_ok=True)
         self.output_file = file.open("w", encoding="utf-8")
@@ -311,12 +312,12 @@ class DeviceDataCollector:
             if device_family != other_device:
                 df = self.create_connection_matrix(device_family, other_device)
                 if df is not None:
-                    combined_bytes += df.values.tobytes()
+                    combined_bytes += df.to_numpy().tobytes()
         # All 6 phase matrices
         for phase in range(6):
             df = self.create_phase_matrix(device_family, phase)
             if df is not None:
-                combined_bytes += df.values.tobytes()
+                combined_bytes += df.to_numpy().tobytes()
         # Force analysis - use stored strengths if available
         strengths = []
         for pin_data in device["pins"]:
@@ -343,11 +344,11 @@ class DeviceDataCollector:
             for conn in pin["connections"]:
                 if conn.get("masked", False):
                     continue
-                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
-                param = conn.get(FW_KEY.CONNECTION_PARAMETER, 0)
-                other_pin_name = get_pin_name(device_family, conn.get(FW_KEY.OTHER_PIN))
+                conn_type = conn.get(FrameworkKey.CONNECTION_TYPE, 0)
+                param = conn.get(FrameworkKey.CONNECTION_PARAMETER, 0)
+                other_pin_name = get_pin_name(device_family, conn.get(FrameworkKey.OTHER_PIN))
 
-                if conn_type == CONNECTION_TYPE.INTERNAL:
+                if conn_type == ConnectionType.INTERNAL:
                     phase_name = PHASE_NAMES.get(param, f"PHASE_{param}")
                     print(f"  {pin_name} -> {other_pin_name} [{phase_name}]")
                 else:  # EXTERNAL
@@ -404,10 +405,10 @@ class DeviceDataCollector:
                 for conn in pin["connections"]:
                     if conn.get("masked", False):
                         continue
-                    conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
-                    param = conn.get(FW_KEY.CONNECTION_PARAMETER, 0)
-                    other_pin_name = get_pin_name(device_family, conn.get(FW_KEY.OTHER_PIN))
-                    if conn_type == CONNECTION_TYPE.INTERNAL:
+                    conn_type = conn.get(FrameworkKey.CONNECTION_TYPE, 0)
+                    param = conn.get(FrameworkKey.CONNECTION_PARAMETER, 0)
+                    other_pin_name = get_pin_name(device_family, conn.get(FrameworkKey.OTHER_PIN))
+                    if conn_type == ConnectionType.INTERNAL:
                         phase_name = PHASE_NAMES.get(param, f"PHASE_{param}")
                         print(f"  {pin_name} -> {other_pin_name} [{phase_name}]")
                     else:  # EXTERNAL
@@ -467,7 +468,7 @@ class DeviceDataCollector:
             print(f"\n{'=' * 80}")
             print(f"Pin Force Analysis - Device {family}")
             print(f"{'=' * 80}")
-            for pin_data, strength in zip(device_data["pins"], strengths):
+            for pin_data, strength in zip(device_data["pins"], strengths, strict=True):
                 pin_num = pin_data.get("pin", "UNKNOWN")
                 pin_name = get_pin_name(family, pin_num)
                 if strength is not None:
@@ -493,9 +494,7 @@ class DeviceDataCollector:
         if strength >= 1 and phase in (1, 3):
             return True
         # Mask pins with strength <= -1 in phases 0 and 2
-        if strength <= -1 and phase in (0, 2):
-            return True
-        return False
+        return strength <= -1 and phase in (0, 2)
 
     def create_connection_matrix(self, controller_a, controller_b):
         if controller_a not in self.devices or controller_b not in self.devices:
@@ -511,11 +510,11 @@ class DeviceDataCollector:
         for pin in device_a["pins"]:
             pin_name_a = get_pin_name(controller_a, pin["pin"])
             for conn in pin["connections"]:
-                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
-                if conn_type == CONNECTION_TYPE.EXTERNAL:
-                    device_id = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
+                conn_type = conn.get(FrameworkKey.CONNECTION_TYPE, 0)
+                if conn_type == ConnectionType.EXTERNAL:
+                    device_id = conn.get(FrameworkKey.CONNECTION_PARAMETER, -1)
                     if device_id == controller_b:
-                        pin_name_b = get_pin_name(controller_b, conn.get(FW_KEY.OTHER_PIN))
+                        pin_name_b = get_pin_name(controller_b, conn.get(FrameworkKey.OTHER_PIN))
                         if pin_name_b in col_labels:
                             df.at[pin_name_a, pin_name_b] = 1
         return df
@@ -559,24 +558,23 @@ class DeviceDataCollector:
                 df.at[pin_name_a, pin_name_a] = 1
 
             for conn in pin["connections"]:
-                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
-                if conn_type == CONNECTION_TYPE.INTERNAL:
-                    conn_phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
-                    pin_name_b = get_pin_name(controller, conn.get(FW_KEY.OTHER_PIN))
+                conn_type = conn.get(FrameworkKey.CONNECTION_TYPE, 0)
+                if conn_type == ConnectionType.INTERNAL:
+                    conn_phase = conn.get(FrameworkKey.CONNECTION_PARAMETER, -1)
+                    pin_name_b = get_pin_name(controller, conn.get(FrameworkKey.OTHER_PIN))
 
-                    if conn_phase == phase and pin_name_b in labels:
-                        if pin_works:
-                            is_masked = conn.get("masked", False)
-                            is_phase_masked = conn.get("phase_masked", False)
+                    if conn_phase == phase and pin_name_b in labels and pin_works:
+                        is_masked = conn.get("masked", False)
+                        is_phase_masked = conn.get("phase_masked", False)
 
-                            if is_phase_masked:
-                                # Phase masked connections show as 3
-                                df.at[pin_name_a, pin_name_b] = 3
-                            elif is_masked:
-                                # Pin strength masked connections show as 2
-                                df.at[pin_name_a, pin_name_b] = 2
-                            else:
-                                df.at[pin_name_a, pin_name_b] = 1
+                        if is_phase_masked:
+                            # Phase masked connections show as 3
+                            df.at[pin_name_a, pin_name_b] = 3
+                        elif is_masked:
+                            # Pin strength masked connections show as 2
+                            df.at[pin_name_a, pin_name_b] = 2
+                        else:
+                            df.at[pin_name_a, pin_name_b] = 1
         return df
 
     def print_phase_matrix(self, controller, phase, filename=None):
@@ -600,13 +598,13 @@ class DeviceDataCollector:
         import socket
         import xml.etree.ElementTree as ET
 
-        os.makedirs("raw_data", exist_ok=True)
-        root = ET.Element("ShepperdTest")
+        root = ET.Element("ShepherdTest")
         meta = ET.SubElement(root, "Metadata")
-        ET.SubElement(meta, "Timestamp").text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ET.SubElement(meta, "Timestamp").text = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
         ET.SubElement(meta, "Computer").text = socket.gethostname()
         try:
-            ET.SubElement(meta, "User").text = os.getlogin()  # TODO: why so much data-collection?
+            ET.SubElement(meta, "User").text = os.getlogin()
+            # TODO: why so much data-collection?
         except:
             ET.SubElement(meta, "User").text = "unknown"
         devices_elem = ET.SubElement(root, "Devices")
@@ -643,13 +641,15 @@ class DeviceDataCollector:
                         chunk_elem.text = base64.b64encode(chunks[chunk_id]).decode("utf-8")
                         packet_id += 1
 
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        filename = f"raw_data/raw_data_{timestamp}.xml"
+        timestamp = datetime.now(tz=UTC).strftime("%Y_%m_%d_%H_%M_%S")
+        path_file = Path.cwd() / f"raw_data_{timestamp}.xml"
+        path_file.parent.mkdir(parents=True, exist_ok=True)
+
         if hasattr(ET, "indent"):
             ET.indent(root, space="  ", level=0)
         tree = ET.ElementTree(root)
-        tree.write(filename, encoding="utf-8", xml_declaration=True)
-        print(f"Raw XML saved to: {filename}")
+        tree.write(path_file, encoding="utf-8", xml_declaration=True)
+        print(f"Raw XML saved to: {path_file}")
 
     def visualize_matrices(self):
         """Visualize all matrices as heatmaps and save to PNG"""
@@ -664,7 +664,7 @@ class DeviceDataCollector:
             )
             return
 
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        timestamp = datetime.now(tz=UTC).strftime("%Y_%m_%d_%H_%M_%S")
         path_vis = Path().cwd() / f"visualization/viz_{timestamp}"
         path_vis.mkdir(parents=True, exist_ok=True)
         print(f"Generating visualizations in: {path_vis}")
@@ -840,10 +840,11 @@ class DeviceDataCollector:
     def load_from_xml(self, filename):
         """Load data from an XML file generated by save_raw_xml"""
         import base64
-        import xml.etree.ElementTree as ET
+
+        import defusedxml.ElementTree as eTree
 
         try:
-            tree = ET.parse(filename)
+            tree = eTree.parse(filename)
             root = tree.getroot()
         except Exception as e:
             print(f"Failed to parse XML file: {e}")

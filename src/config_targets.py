@@ -1,5 +1,7 @@
 from collections.abc import Mapping
 
+# TODO: add generalized target-names. this is specific to riotee / shepherd-target
+
 # Pin Name Mappings for NRF52840
 NRF52840_PIN_NAMES: Mapping[int, str] = {
     21: "GPIO0_UART_RX",

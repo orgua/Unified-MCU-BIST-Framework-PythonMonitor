@@ -1,15 +1,16 @@
-"""
-Connection Analyzer - Analyzes pin connections and creates coordinate system vectors
+"""Connection Analyzer
+
+Analyzes pin connections and creates coordinate system vectors
 """
 
-from datetime import datetime
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from .config_framework import CONNECTION_TYPE
-from .config_framework import FW_KEY
 from .config_framework import PHASE_VECTORS
+from .config_framework import ConnectionType
+from .config_framework import FrameworkKey
 from .config_targets import get_pin_name
 
 # Phase masking is now handled in data_storage.py before vector analysis
@@ -31,7 +32,7 @@ def analyze_connections(collector):
 
             # Process all connections of this pin
             for conn in pin["connections"]:
-                conn_type = conn.get(FW_KEY.CONNECTION_TYPE, 0)
+                conn_type = conn.get(FrameworkKey.CONNECTION_TYPE, 0)
 
                 # Skip masked connections
                 if conn.get("masked", False):
@@ -42,12 +43,12 @@ def analyze_connections(collector):
                     continue
 
                 # Get phase for this connection
-                original_phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
+                original_phase = conn.get(FrameworkKey.CONNECTION_PARAMETER, -1)
 
                 # Only process internal connections
-                if conn_type == CONNECTION_TYPE.INTERNAL:
-                    target_pin = conn.get(FW_KEY.OTHER_PIN)
-                    phase = conn.get(FW_KEY.CONNECTION_PARAMETER, -1)
+                if conn_type == ConnectionType.INTERNAL:
+                    target_pin = conn.get(FrameworkKey.OTHER_PIN)
+                    phase = conn.get(FrameworkKey.CONNECTION_PARAMETER, -1)
 
                     # Skip if phase is invalid
                     if phase not in PHASE_VECTORS:
@@ -78,12 +79,11 @@ def analyze_connections(collector):
                     )
 
         # Store all individual phase vectors with filtering
-        for pair_key, data in pair_connections.items():
+        for data in pair_connections.values():
             pin_a_name = get_pin_name(device_family, data["pin_a"])
             pin_b_name = get_pin_name(device_family, data["pin_b"])
 
             # Calculate grouped vectors (phase masking already applied at connection level)
-            phases = data["phases"]
             grouped_vectors = []
 
             # Group 1: Phases 0, 2, 4
@@ -94,10 +94,6 @@ def analyze_connections(collector):
             # Use all vectors (phase masking already filtered out masked connections)
             a_to_b_vectors = data["a_to_b_vectors"]
             b_to_a_vectors = data["b_to_a_vectors"]
-
-            # Get phases for each direction
-            a_to_b_phases_set = set(phase for _, phase in a_to_b_vectors)
-            b_to_a_phases_set = set(phase for _, phase in b_to_a_vectors)
 
             # Calculate A_to_B Group 1 (phases 0+2+4) - 2D vector sum
             a_to_b_group1_vectors = [
@@ -193,10 +189,9 @@ def analyze_connections(collector):
     return results
 
 
-def create_vector_plots(collector, base_dir):
+def create_vector_plots(collector, base_dir: Path):
     """Create connection vector plots in the given directory"""
     results = analyze_connections(collector)
-    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 
     # Set seaborn style for better looking plots
     sns.set_style("whitegrid")
@@ -212,7 +207,7 @@ def create_vector_plots(collector, base_dir):
         rows = (n_pairs + cols - 1) // cols  # Ceiling division
 
         # Create figure with subplots for each pin pair
-        fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
+        _, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
 
         # Handle case where there's only one subplot
         if n_pairs == 1:
@@ -271,14 +266,9 @@ def create_vector_plots(collector, base_dir):
                 }
 
                 # Plot 2D vectors directly
-                for vector_info in plot_order_vectors:
-                    dx, dy = vector_info["value"]  # 2D vector components
-                    group = vector_info["group"]
-                    direction = vector_info["direction"]
-                    label = vector_info["label"]
-
-                    # Plot 2D arrow from origin with direction+group specific color
-                    color = vector_colors[(direction, group)]
+                for _v in plot_order_vectors:
+                    dx, dy = _v["value"]
+                    color = vector_colors[(_v["direction"], _v["group"])]
                     ax.arrow(
                         0,
                         0,
@@ -290,17 +280,16 @@ def create_vector_plots(collector, base_dir):
                         ec=color,
                         linewidth=2.5,
                         alpha=1.0,
-                        label=label,
+                        label=_v["label"],
                     )
-
-                    # Add x-axis value label offset from arrow tip
-                    magnitude = (dx**2 + dy**2) ** 0.5
-                    label_offset_x = 1.0 * (dx / magnitude) if magnitude > 0 else 0
-                    label_offset_y = 1.0 * (dy / magnitude) if magnitude > 0 else 0
+                    mag = (dx**2 + dy**2) ** 0.5
+                    lx = dx + (dx / mag if mag else 0)
+                    ly = dy + (dy / mag if mag else 0)
+                    dx_label = f"+{abs(dx):.0f}" if dy > 0 else f"-{abs(dx):.0f}"
                     ax.text(
-                        dx + label_offset_x,
-                        dy + label_offset_y,
-                        f"{dx:.0f}",
+                        lx,
+                        ly,
+                        dx_label,
                         fontsize=10,
                         color="black",
                         ha="center",

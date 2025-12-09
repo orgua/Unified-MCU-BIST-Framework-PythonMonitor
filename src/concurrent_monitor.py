@@ -42,7 +42,7 @@ def send_ack(serial: Serial, received_hash):
         print(f"ACK send failed: {e}")
 
 
-def parse_packet(hex_data, has_packet_id=False):
+def parse_packet(hex_data, *, has_packet_id=False):
     """Parse CBOR packet: [PACKET_ID?][LENGTH][CBOR][CRC]"""
     try:
         offset = 0

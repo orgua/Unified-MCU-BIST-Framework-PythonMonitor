@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from enum import Enum
 
 
-class FW_KEY(int, Enum):  # TODO: find better name
+class FrameworkKey(int, Enum):  # TODO: find better name
     CHUNK_ID = 0
     PINS = 2
     PIN = 4
@@ -14,7 +14,7 @@ class FW_KEY(int, Enum):  # TODO: find better name
     STREAM_NUMBER = 10
 
 
-class HEADER_KEY(int, Enum):
+class HeaderKey(int, Enum):
     DEVICE_UUID = 0
     DEVICE_FAMILY = 1
     TOTAL_CHUNKS = 2
@@ -28,13 +28,13 @@ class HEADER_KEY(int, Enum):
     EXPECTED_SESSIONS = 10
 
 
-class CONNECTION_TYPE(int, Enum):
+class ConnectionType(int, Enum):
     INTERNAL = 0
     EXTERNAL = 1
 
 
 # Internal Connection Phases
-class PHASE(int, Enum):
+class PhaseNum(int, Enum):
     PULLDOWN = 0
     PULLUP = 1
     DRIVE_LOW = 2

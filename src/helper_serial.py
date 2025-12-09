@@ -28,6 +28,6 @@ def serial_port_list() -> list:
             s = serial.Serial(port_)
             s.close()
             result.append(port_)
-        except (OSError, serial.SerialException):
+        except (OSError, serial.SerialException):  # noqa: PERF203
             pass
     return result

@@ -32,7 +32,8 @@ verbose_opt_t = typer.Option(
 
 @cli.callback()
 def cli_callback(*, verbose: bool = verbose_opt_t) -> None:
-    """Enable verbosity and add exit-handlers
+    """Enable verbosity and add exit-handlers.
+
     this gets executed prior to the other sub-commands
     """
     signal.signal(signal.SIGTERM, exit_gracefully)
