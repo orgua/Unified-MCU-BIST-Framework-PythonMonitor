@@ -1,7 +1,9 @@
 [project]
-name = "testsoftware-monitor"
-version = "0.1.0"
-description = ""
+name = "BISTMon"
+version = "0.2.0"
+description = "Analyze state of MCU-Boards by utilizing GPIOs to characterize external circuitry."
+keywords = ["built-in self-test", "BIST", "MCU", "MCU-Boards", "Monitor", "Framework", "generalized"]
+
 authors = [
     {name = "Päpke, Tim Carlo",email = "tim.paepke@stud.tu-darmstadt.de"}
 ]
@@ -16,12 +18,14 @@ dependencies = [
     "seaborn (>=0.13.2,<0.14.0)",
     "matplotlib (>=3.10.7,<4.0.0)",
     "pandas (>=2.3.3,<3.0.0)",
+    "chromalog",
+    "typer",
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest",
-    #"pytest-click",
+    "pytest-click",
     "coverage",
 ]
 
@@ -32,6 +36,13 @@ dev = [
     "pandas-stubs",  # for pyright with pandas
 ]
 
+[project.scripts]
+bistmon = "bistmon.cli:cli"
+
 [build-system]
 requires = ["setuptools>=61.2", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+platforms = ["unix", "linux", "osx", "cygwin", "win32", "win64"]
+package-dir = {"bistmon" = "./src/"}

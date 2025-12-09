@@ -1,6 +1,6 @@
-/logs/
-/raw_data/
-/visualization/
+logs/
+raw_data/
+visualization/
 .eggs/
 build/
 dist/
