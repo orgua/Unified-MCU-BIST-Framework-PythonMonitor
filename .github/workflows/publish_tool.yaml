@@ -37,9 +37,8 @@ jobs:
 
       - name: Build package 🧱
         run: uv build --clear
-        working-directory: "./src"
 
       - name: Publish package 🥳
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: src/dist/
+          packages-dir: dist/

@@ -23,6 +23,7 @@ def test_cli_load_recording(file: Path) -> None:
     res = CliRunner().invoke(cli, ["--verbose", "load", file.as_posix()])
     assert res.exit_code == 0
 
+
 def test_cli_list_serial_ports() -> None:
     res = CliRunner().invoke(cli, ["--verbose", "list"])
     assert res.exit_code == 0

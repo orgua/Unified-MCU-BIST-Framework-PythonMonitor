@@ -32,11 +32,9 @@ jobs:
 
       - name: Test-Build Package 🧱
         run: uv build --clear
-        working-directory: "./src"
 
       - name: Install package via uv 🧱
         run: uv pip install .[dev]
-        working-directory: "./src"
 
       - name: Install package via uv 🧱
         run: pytest
