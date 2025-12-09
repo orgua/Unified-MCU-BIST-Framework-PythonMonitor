@@ -17,16 +17,17 @@ ignore = [
     "D404", "D405", "D406", "D407", "D408", "D409",  # conflicts with PEP257-convention (B)
     "D410", "D411", "D413", "D415", "D416", "D417",  # conflicts with PEP257-convention (C)
     "EM101", "TRY003", "TRY400",  # xpt & strings
+    "PD008", # allow .at[]
     # TODO: for releasing now - do add documentation later
     "D102", "D100", "D103", "D400", "D400",
-    "ANN201", "ANN202", "ANN204", "ANN001",
-    "T201", "PLC0415",
+    #"ANN201", "ANN202", "ANN204", "ANN001",
+    "PLC0415",
 ]
 exclude = []  # must be adapted to project first
 
 [lint.per-file-ignores]
-"*/tests/**" = ["ARG", "S", "D", "T201"]
-"*/examples/**" = [
+"tests/**" = ["ARG", "S", "D", "T201"]
+"examples/**" = [
     "INP001", # no namespace
     "T201",   # allow print
 ]
