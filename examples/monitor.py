@@ -1,9 +1,5 @@
-import sys
+from bistmon import concurrent_monitor
 
-if __name__ == "__main__":
-    print("Starting Serial Monitor")
+print("Starting Serial Monitor")
 
-    if len(sys.argv) > 1:
-        concurrent_monitor.offline_mode(sys.argv[1])
-    else:
-        concurrent_monitor.monitor_serial()
+concurrent_monitor.monitor_serial("/dev/tty.usbmodem11102")
