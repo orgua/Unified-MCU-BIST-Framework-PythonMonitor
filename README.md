@@ -1,18 +1,24 @@
-# TestFramework Serial Monitor
+# BISTMon
 
-A serial monitor and analysis too. It handles real-time data monitoring, matrix calculations, and XML data management.
+A serial monitor and analysis tool for the [BIST-Framework](https://github.com/tim-carlo/Unified-MCU-BIST-Framework), a framework for generalized built-in self-tests of microcontroller-boards utilizing the MCUs itself.
+
+The monitor handles real-time data monitoring, matrix calculations, and XML data management.
 
 ## Installation & Setup
 
 This project uses can be installed via
 
-```bass
+```bash
 pip install .
 ```
 
-It is recommended to use a tool like uv, poetry or pipenv to work inside a virtual environment:
+It is recommended to use a tool like uv, poetry or pipenv to work inside a virtual environment.
 
-**Poetry** for dependency management and virtual environments.
+### Instructions for UV
+
+Navigate to the
+
+### Instructions for Poetry
 
 1.  **Install dependencies:**
 
@@ -26,23 +32,22 @@ It is recommended to use a tool like uv, poetry or pipenv to work inside a virtu
     poetry shell
     ```
 
-## Configuration
-
-To adjust the serial connection settings, edit `concurrent_monitor.py`:
-
-  * **Change Port:** Modify the `PORT` variable.
-  * **Change Baud Rate:** Modify the `BAUD` variable.
-
 ## Usage
 
-Ensure your virtual environment is active (via `poetry shell`) or prepend `poetry run` to the commands below.
+Ensure your virtual environment is active (e.g. via `poetry shell`) or prepend `poetry run` to the commands below.
 
 ### 1\. Live Monitor Mode
 
-Connects to the serial port defined in `concurrent_monitor.py`.
+Determine the available serial ports
 
 ```bash
-python concurrent_monitor.py
+bistmon list
+```
+
+Select one port from the list and start monitoring.
+
+```bash
+bistmon serial tty.usbmodem11102
 ```
 
 ### 2\. File Analysis Mode
@@ -50,7 +55,7 @@ python concurrent_monitor.py
 Loads and analyzes a previously saved XML dataset.
 
 ```bash
-python concurrent_monitor.py raw_data/my_data.xml
+bistmon load ./raw_data/my_data.xml
 ```
 
 ## Interactive Commands
