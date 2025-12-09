@@ -31,7 +31,7 @@ test = [
 ]
 
 dev = [
-    "testsoftware-monitor[test]",
+    "bistmon[test]",
     "pre-commit",
     "pre-commit-uv", # check with `pre-commit --version`
     "pandas-stubs",  # for pyright with pandas
