@@ -1,0 +1,24 @@
+name: QA-Tests
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  static-analysis:
+    uses: ./.github/workflows/static_analysis.yaml
+  test-tool:
+    uses: ./.github/workflows/test_py_tool.yaml
+
+
+  quality-assurance:
+    runs-on: ubuntu-latest
+    needs:
+      - static-analysis
+      - test-tool
+
+    steps:
+      - name: Finished
+        run: echo "finished"

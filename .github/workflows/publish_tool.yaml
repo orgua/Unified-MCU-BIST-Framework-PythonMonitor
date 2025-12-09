@@ -1,0 +1,45 @@
+name: Publish Tool-Package to PyPi
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*.*.*'
+    # branches: [ main ]  # handled as OR! (push to main OR tagged)
+
+permissions:
+  contents: read
+
+jobs:
+
+  publish:
+    # if: github.ref == 'refs/heads/main' # TODO: does NOT work - is 'refs/tags/v2025.xx.x'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/bistmon
+    permissions:
+      id-token: write
+
+    steps:
+
+      - name: Checkout 🛎️
+        uses: actions/checkout@v5
+
+      - name: Install uv 🔧 & set up Python 🐍
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          activate-environment: true
+
+      - name: Build package 🧱
+        run: uv build --clear
+        working-directory: "./src"
+
+      - name: Publish package 🥳
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: src/dist/
