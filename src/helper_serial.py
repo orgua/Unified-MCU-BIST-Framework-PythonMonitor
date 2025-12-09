@@ -24,10 +24,11 @@ def serial_port_list() -> list:
 
     result = []
     for port_ in ports_:
+        port = port_.as_posix() if isinstance(port_, Path) else port_
         try:
-            s = serial.Serial(port_)
+            s = serial.Serial(port)
             s.close()
             result.append(port_)
-        except (OSError, serial.SerialException):  # noqa: PERF203
+        except (OSError, serial.SerialException):
             pass
     return result

@@ -36,5 +36,5 @@ jobs:
       - name: Install package via uv 🧱
         run: uv pip install .[dev]
 
-      - name: Install package via uv 🧱
+      - name: Unittests
         run: pytest
