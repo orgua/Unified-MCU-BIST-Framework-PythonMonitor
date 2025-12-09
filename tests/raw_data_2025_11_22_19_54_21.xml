@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<ShepperdTest>
+<ShepherdTest>
   <Metadata>
     <Timestamp>2025-11-22 19:54:21</Timestamp>
     <Computer>MacBookPro.fritz.box</Computer>
@@ -178,4 +178,4 @@
       <RawData Type="Chunk" Session="6" Id="168" ChunkId="23" Encoding="base64">pAgAAQIKBgKCowQYLgUaAMzAAAaAowQYLwUaAMzAAAaA</RawData>
     </Device>
   </Devices>
-</ShepperdTest>
+</ShepherdTest>
